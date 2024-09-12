@@ -4,7 +4,8 @@
 //!
 //! This module mainly exports a few helper types for unit conversion such as
 //! [degrees](wrapper::Degrees).
-
+#![allow(incomplete_features)]
+#![feature(generic_const_exprs)]
 #![no_main]
 #![no_std]
 #![feature(async_fn_traits)]
