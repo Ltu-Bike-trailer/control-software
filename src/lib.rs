@@ -19,6 +19,7 @@ use defmt_rtt as _;
 use panic_probe as _;
 
 pub mod gain_scheduled;
+pub mod logging;
 pub mod pid;
 pub mod wrapper;
 
