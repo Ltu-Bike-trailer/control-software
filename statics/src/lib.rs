@@ -2,15 +2,15 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{bracketed, parse::Parse, parse_macro_input, Ident, LitStr, Token};
 
-fn _hash(data: &str) -> u64 {
-    let mut prev_sum: u64 = 0;
+fn _hash(data: &str) -> u32 {
+    let mut prev_sum: u32 = 0;
     data.as_bytes()
         .iter()
         .map(|num| {
-            prev_sum = prev_sum ^ *num as u64;
+            prev_sum = prev_sum ^ *num as u32;
             prev_sum
         })
-        .sum::<u64>()
+        .sum::<u32>()
 }
 
 #[proc_macro]
@@ -32,8 +32,10 @@ pub fn string_to_bytes(item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as LitStr).value();
     let bytes = input.as_bytes();
 
+    let len = (bytes.len() >> 1).to_le_bytes();
+
     quote! {
-        [#(#bytes,)*]
+        [#(#len,)*#(#bytes,)*]
     }
     .into()
 }

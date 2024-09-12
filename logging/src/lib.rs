@@ -24,12 +24,12 @@ pub enum LogLevel {
 }
 
 pub struct BuffLogger {
-    // We get a list of 100 u64s.
-    format_hash: [u64; 100],
+    // We get a list of 100 u32s.
+    format_hash: [u32; 100],
     draining: bool,
     filling: bool,
     data: [u8; LOGGER_BUFFER_SIZE],
-    hash_ref: [u8; 8],
+    hash_ref: [u8; 4],
     buffer_count: usize,
 }
 
@@ -38,7 +38,7 @@ static mut BUFF_LOGGER: MaybeUninit<BuffLogger> = MaybeUninit::uninit();
 pub struct Logger<
     'buffers,
     'ret,
-    F: FnMut(LogLevel, &'buffers [u8], u64, &'buffers [u8]) -> (&'ret [u8],usize),
+    F: FnMut(LogLevel, &'buffers [u8], u32, &'buffers [u8]) -> (&'ret [u8],usize),
 > {
     combiner: F,
     data: PhantomData<&'buffers PhantomData<()>>,
@@ -49,7 +49,7 @@ impl BuffLogger {
     fn init<
         'buffers,
         'ret,
-        F: FnMut(LogLevel, &'buffers [u8], u64, &'buffers [u8]) -> (&'ret [u8],usize),
+        F: FnMut(LogLevel, &'buffers [u8], u32, &'buffers [u8]) -> (&'ret [u8],usize),
     >(
         combiner: F,
     ) -> Logger<'buffers, 'ret, F> {
@@ -59,7 +59,7 @@ impl BuffLogger {
                 draining: false,
                 filling: false,
                 data: [0; 1024],
-                hash_ref: [0; 8],
+                hash_ref: [0; 4],
                 buffer_count: 0,
             });
         }
@@ -70,14 +70,13 @@ impl BuffLogger {
         }
     }
 
-    fn name_or_hash<'a>(&'a mut self, name: &'a [u8], hash: &'a u64, data: &mut &'a [u8]) ->usize {
+    fn name_or_hash<'a>(&'a mut self, name: &'a [u8], hash: &'a u32, data: &mut &'a [u8]) ->usize {
         let mut last_idx = 0;
         for (idx, el) in self.format_hash.iter().enumerate() {
             if self.format_hash.contains(hash) {
-                self.hash_ref = hash.to_le_bytes();
-
+                self.hash_ref = ((hash >> 1) | 0x80000000).to_le_bytes();
                 *data = &self.hash_ref;
-                return 8;
+                return 4;
             }
             last_idx = idx;
         }
@@ -112,7 +111,7 @@ impl BuffLogger {
         ret
     }
 }
-impl<'buffers, 'ret, F: FnMut(LogLevel, &'buffers [u8], u64, &'buffers [u8]) -> (&'ret [u8],usize)>
+impl<'buffers, 'ret, F: FnMut(LogLevel, &'buffers [u8], u32, &'buffers [u8]) -> (&'ret [u8],usize)>
     Logger<'buffers, 'ret, F>
 {
     /// This assumes thtat the data buffer is larger than [`LOGGER_BUFFER_SIZE`]
@@ -152,6 +151,21 @@ impl Serializable for i32 {
 // Be a good citizen and pass the actual logger after locking it with rtic :)
 // Things might break otherwise. I assumes that locking is done externally.
 #[macro_export]
+macro_rules! trace {
+    ($logger:ident, $fmt_str:literal, $($token:ident),*) => {
+        #[cfg(all(feature = "trace",feature = "defmt"))]
+        {
+            use defmt::trace;
+            trace!($fmt_str,$($token,)*);
+        }
+        #[cfg(all(feature = "trace",any(feature="can",feature="ble")))]
+        {
+            log!($logger, $fmt_str,$($token),*;LogLevel::Trace);
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! info {
     ($logger:ident, $fmt_str:literal, $($token:ident),*) => {
         #[cfg(all(feature = "info",feature = "defmt"))]
@@ -162,6 +176,51 @@ macro_rules! info {
         #[cfg(all(feature = "info",any(feature="can",feature="ble")))]
         {
             log!($logger, $fmt_str,$($token),*;LogLevel::Info);
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! debug {
+    ($logger:ident, $fmt_str:literal, $($token:ident),*) => {
+        #[cfg(all(feature = "debug",feature = "defmt"))]
+        {
+            use defmt::debug;
+            debug!($fmt_str,$($token,)*);
+        }
+        #[cfg(all(feature = "debug",any(feature="can",feature="ble")))]
+        {
+            log!($logger, $fmt_str,$($token),*;LogLevel::Debug);
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! warn {
+    ($logger:ident, $fmt_str:literal, $($token:ident),*) => {
+        #[cfg(all(feature = "warn",feature = "defmt"))]
+        {
+            use defmt::warn;
+            warn!($fmt_str,$($token,)*);
+        }
+        #[cfg(all(feature = "warn",any(feature="can",feature="ble")))]
+        {
+            log!($logger, $fmt_str,$($token),*;LogLevel::Warn);
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! error {
+    ($logger:ident, $fmt_str:literal, $($token:ident),*) => {
+        #[cfg(all(feature = "error",feature = "defmt"))]
+        {
+            use defmt::error;
+            error!($fmt_str,$($token,)*);
+        }
+        #[cfg(all(feature = "error",any(feature="can",feature="ble")))]
+        {
+            log!($logger, $fmt_str,$($token),*;LogLevel::Error);
         }
     };
 }
@@ -216,7 +275,7 @@ mod test {
         fn combiner<'buffers, 'ret>(
             level: LogLevel,
             fmt_str: &'buffers [u8],
-            hash: u64,
+            hash: u32,
             args: &'buffers [u8],
         ) -> (&'ret [u8],usize) {
             unsafe {
@@ -239,6 +298,14 @@ mod test {
         let n = logger.drain(&mut buffer);
         println!("Buffer {:?}", &buffer[0..n]);
         info!(logger, "Some formatting string {}", i);
+        let mut buffer = [0; 225];
+        let n = logger.drain(&mut buffer);
+        println!("Buffer {:?}", &buffer[0..n]);
+        info!(logger, "SOME REALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLY long log message {}", i);
+        let mut buffer = [0; 225];
+        let n = logger.drain(&mut buffer);
+        println!("Buffer {:?}", &buffer[0..n]);
+        info!(logger, "SOME REALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLY long log message {}", i);
         let mut buffer = [0; 225];
         let n = logger.drain(&mut buffer);
         println!("Buffer {:?}", &buffer[0..n]);

@@ -9,7 +9,14 @@ statics = { path = "../statics" }
 
 [features]
 std = []
-info = []
 
 can = []
 ble = []
+defmt = []
+
+
+info = ["trace"]
+trace = ["debug"]
+debug = ["warn"]
+warn = ["error"]
+error = []
