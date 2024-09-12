@@ -29,6 +29,7 @@ pub struct BuffLogger {
     draining: bool,
     filling: bool,
     data: [u8; LOGGER_BUFFER_SIZE],
+    hash_ref: [u8; 8],
     buffer_count: usize,
 }
 
@@ -37,7 +38,7 @@ static mut BUFF_LOGGER: MaybeUninit<BuffLogger> = MaybeUninit::uninit();
 pub struct Logger<
     'buffers,
     'ret,
-    F: FnMut(LogLevel, &'buffers [u8], u64, &'buffers [u8]) -> &'ret [u8],
+    F: FnMut(LogLevel, &'buffers [u8], u64, &'buffers [u8]) -> (&'ret [u8],usize),
 > {
     combiner: F,
     data: PhantomData<&'buffers PhantomData<()>>,
@@ -48,7 +49,7 @@ impl BuffLogger {
     fn init<
         'buffers,
         'ret,
-        F: FnMut(LogLevel, &'buffers [u8], u64, &'buffers [u8]) -> &'ret [u8],
+        F: FnMut(LogLevel, &'buffers [u8], u64, &'buffers [u8]) -> (&'ret [u8],usize),
     >(
         combiner: F,
     ) -> Logger<'buffers, 'ret, F> {
@@ -58,6 +59,7 @@ impl BuffLogger {
                 draining: false,
                 filling: false,
                 data: [0; 1024],
+                hash_ref: [0; 8],
                 buffer_count: 0,
             });
         }
@@ -66,6 +68,23 @@ impl BuffLogger {
             data: PhantomData,
             retdata: PhantomData,
         }
+    }
+
+    fn name_or_hash<'a>(&'a mut self, name: &'a [u8], hash: &'a u64, data: &mut &'a [u8]) ->usize {
+        let mut last_idx = 0;
+        for (idx, el) in self.format_hash.iter().enumerate() {
+            if self.format_hash.contains(hash) {
+                self.hash_ref = hash.to_le_bytes();
+
+                *data = &self.hash_ref;
+                return 8;
+            }
+            last_idx = idx;
+        }
+        self.format_hash[last_idx] = *hash;
+        let n = name.len();
+        *data = name;
+        n
     }
 }
 
@@ -84,8 +103,24 @@ impl BuffLogger {
     }
 
     /// This assumes thtat the data buffer is larger than [`LOGGER_BUFFER_SIZE`]
-    pub fn drain<'drain_buffer>(&mut self, data: &'drain_buffer mut [u8]) {
-        data.copy_from_slice(&self.data[0..self.buffer_count]);
+    pub fn drain<'drain_buffer>(&mut self, data: &'drain_buffer mut [u8]) -> usize {
+        for (idx, el) in self.data[0..self.buffer_count].iter().enumerate() {
+            data[idx] = *el;
+        }
+        let ret = self.buffer_count;
+        self.buffer_count = 0;
+        ret
+    }
+}
+impl<'buffers, 'ret, F: FnMut(LogLevel, &'buffers [u8], u64, &'buffers [u8]) -> (&'ret [u8],usize)>
+    Logger<'buffers, 'ret, F>
+{
+    /// This assumes thtat the data buffer is larger than [`LOGGER_BUFFER_SIZE`]
+    pub fn drain<'drain_buffer>(&self, data: &'drain_buffer mut [u8]) -> usize {
+        unsafe {
+            let buffer = BUFF_LOGGER.borrow_mut().assume_init_mut();
+            buffer.drain(data)
+        }
     }
 }
 
@@ -131,11 +166,12 @@ macro_rules! info {
     };
 }
 
+#[macro_export]
 macro_rules! log {
     ($logger:ident, $fmt_str:literal, $($token:ident),*;$loglevel:expr) => {
         use statics::{hash,string_to_bytes};
-        use crate::BUFF_LOGGER;
-        let arguments = [$($token::into(),)*];
+        use crate::{BUFF_LOGGER,Serializable};
+        let arguments = [$($token,)*];
         let mut ptr = 0;
 
         const BUFFER_LEN:usize = 200;
@@ -158,18 +194,22 @@ macro_rules! log {
             }
         }
 
-        let data = ($logger.combiner)($loglevel,&string_to_bytes!($fmt_str), hash!($fmt_str),&format_arg_buffer);
         use core::borrow::BorrowMut;
         unsafe{
             let buffer = BUFF_LOGGER.borrow_mut().assume_init_mut();
-            buffer.extend(&data);
+            let no_name = [];
+            let mut name = &no_name[..];
+            let n = buffer.name_or_hash(&string_to_bytes!($fmt_str),&hash!($fmt_str),&mut name);
+            let (data,n) = ($logger.combiner)($loglevel,&name[0..n], hash!($fmt_str),&format_arg_buffer[0..ptr]);
+            buffer.extend(&data[0..n]);
         };
     }
 }
 
 #[cfg(all(test, feature = "std"))]
 mod test {
-    use super::{info, BuffLogger, LogLevel};
+    #[macro_use]
+    use super::{info, BuffLogger, LogLevel, BUFF_LOGGER};
     static mut DATA: Vec<u8> = vec![];
     #[test]
     fn test_info() {
@@ -178,16 +218,30 @@ mod test {
             fmt_str: &'buffers [u8],
             hash: u64,
             args: &'buffers [u8],
-        ) -> &'ret [u8] {
+        ) -> (&'ret [u8],usize) {
             unsafe {
+                let _ = DATA.drain(..);
+                DATA.resize(0,0);
+                let n = fmt_str.len() + args.len();
                 DATA.extend(fmt_str);
                 DATA.extend(args);
 
-                &DATA
+                (&DATA,n)
             }
         }
         let logger = BuffLogger::init(combiner);
         let i: i32 = 1;
+        let mut buffer = [0; 225];
+        let n = logger.drain(&mut buffer);
+        println!("Buffer {:?}", &buffer[0..n]);
         info!(logger, "Some formatting string {}", i);
+        let mut buffer = [0; 225];
+        let n = logger.drain(&mut buffer);
+        println!("Buffer {:?}", &buffer[0..n]);
+        info!(logger, "Some formatting string {}", i);
+        let mut buffer = [0; 225];
+        let n = logger.drain(&mut buffer);
+        println!("Buffer {:?}", &buffer[0..n]);
+        panic!()
     }
 }
