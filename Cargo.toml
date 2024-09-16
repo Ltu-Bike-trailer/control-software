@@ -26,6 +26,8 @@ lib = { path = "./lib",default-features = false }
 
 ## Defines a double ended queue implementation of arrays instead of vectors
 arraydeque = { version = "0.5.1", default-features = false }
+embedded-can = "0.4.1"
+nb = "1.1.0"
 
 # cargo build/run
 [profile.dev]
