@@ -1,10 +1,8 @@
 #![allow(warnings)]
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
-#![cfg_attr(not(feature = "std"), no_std)]
-#![cfg(feature = "std")]
-extern crate std as core;
-
+#![no_std]
+pub mod serializer;
 use core::{
     borrow::BorrowMut,
     cell::UnsafeCell,
@@ -33,23 +31,23 @@ pub struct BuffLogger {
     buffer_count: usize,
 }
 
-static mut BUFF_LOGGER: MaybeUninit<BuffLogger> = MaybeUninit::uninit();
+pub static mut BUFF_LOGGER: MaybeUninit<BuffLogger> = MaybeUninit::uninit();
 
 pub struct Logger<
     'buffers,
     'ret,
-    F: FnMut(LogLevel, &'buffers [u8], u32, &'buffers [u8]) -> (&'ret [u8],usize),
+    F: FnMut(LogLevel, &'buffers [u8], u32, &'buffers [u8]) -> (&'ret [u8], usize),
 > {
-    combiner: F,
-    data: PhantomData<&'buffers PhantomData<()>>,
-    retdata: PhantomData<&'ret PhantomData<()>>,
+    pub combiner: F,
+    pub data: PhantomData<&'buffers PhantomData<()>>,
+    pub retdata: PhantomData<&'ret PhantomData<()>>,
 }
 
 impl BuffLogger {
-    fn init<
+    pub fn init<
         'buffers,
         'ret,
-        F: FnMut(LogLevel, &'buffers [u8], u32, &'buffers [u8]) -> (&'ret [u8],usize),
+        F: FnMut(LogLevel, &'buffers [u8], u32, &'buffers [u8]) -> (&'ret [u8], usize),
     >(
         combiner: F,
     ) -> Logger<'buffers, 'ret, F> {
@@ -70,7 +68,12 @@ impl BuffLogger {
         }
     }
 
-    fn name_or_hash<'a>(&'a mut self, name: &'a [u8], hash: &'a u32, data: &mut &'a [u8]) ->usize {
+    pub fn name_or_hash<'a>(
+        &'a mut self,
+        name: &'a [u8],
+        hash: &'a u32,
+        data: &mut &'a [u8],
+    ) -> usize {
         let mut last_idx = 0;
         for (idx, el) in self.format_hash.iter().enumerate() {
             if self.format_hash.contains(hash) {
@@ -111,8 +114,11 @@ impl BuffLogger {
         ret
     }
 }
-impl<'buffers, 'ret, F: FnMut(LogLevel, &'buffers [u8], u32, &'buffers [u8]) -> (&'ret [u8],usize)>
-    Logger<'buffers, 'ret, F>
+impl<
+        'buffers,
+        'ret,
+        F: FnMut(LogLevel, &'buffers [u8], u32, &'buffers [u8]) -> (&'ret [u8], usize),
+    > Logger<'buffers, 'ret, F>
 {
     /// This assumes thtat the data buffer is larger than [`LOGGER_BUFFER_SIZE`]
     pub fn drain<'drain_buffer>(&self, data: &'drain_buffer mut [u8]) -> usize {
@@ -128,23 +134,12 @@ pub trait Serializable {
     type Error: Sized;
     /// Returns number of bytes used and buffer.
     fn into_bytes<'a>(&'a self) -> (usize, [u8; Self::BUFFER_SIZE]);
-    fn from_bytes<'a>(data: &'a mut [u8]) -> Result<Self, Self::Error>
+    fn from_bytes<'a>(ptr: usize, data: &'a mut [u8]) -> Result<(usize, Self), Self::Error>
     where
         Self: Sized;
-}
 
-impl Serializable for i32 {
-    type Error = ();
-
-    const BUFFER_SIZE: usize = 4;
-
-    /// Returns number of bytes used and buffer.
-    fn into_bytes<'a>(&'a self) -> (usize, [u8; Self::BUFFER_SIZE]) {
-        (4, self.to_le_bytes())
-    }
-
-    fn from_bytes<'a>(data: &'a mut [u8]) -> Result<Self, Self::Error> {
-        unimplemented!()
+    fn buffer_size(&self) -> usize {
+        Self::BUFFER_SIZE
     }
 }
 
@@ -168,13 +163,14 @@ macro_rules! trace {
 #[macro_export]
 macro_rules! info {
     ($logger:ident, $fmt_str:literal, $($token:ident),*) => {
-        #[cfg(all(feature = "info",feature = "defmt"))]
+        #[cfg(all(feature = "info", feature = "defmt"))]
         {
             use defmt::info;
             info!($fmt_str,$($token,)*);
         }
-        #[cfg(all(feature = "info",any(feature="can",feature="ble")))]
+        #[cfg(all(feature = "info", any(feature="can", feature="ble")))]
         {
+            println!("REACHED LOGGING POINT");
             log!($logger, $fmt_str,$($token),*;LogLevel::Info);
         }
     };
@@ -265,50 +261,18 @@ macro_rules! log {
     }
 }
 
-#[cfg(all(test, feature = "std"))]
-mod test {
-    #[macro_use]
-    use super::{info, BuffLogger, LogLevel, BUFF_LOGGER};
-    static mut DATA: Vec<u8> = vec![];
-    #[test]
-    fn test_info() {
-        fn combiner<'buffers, 'ret>(
-            level: LogLevel,
-            fmt_str: &'buffers [u8],
-            hash: u32,
-            args: &'buffers [u8],
-        ) -> (&'ret [u8],usize) {
-            unsafe {
-                let _ = DATA.drain(..);
-                DATA.resize(0,0);
-                let n = fmt_str.len() + args.len();
-                DATA.extend(fmt_str);
-                DATA.extend(args);
+pub mod prelude {
+    pub use statics::{self, hash, string_to_bytes};
 
-                (&DATA,n)
-            }
-        }
-        let logger = BuffLogger::init(combiner);
-        let i: i32 = 1;
-        let mut buffer = [0; 225];
-        let n = logger.drain(&mut buffer);
-        println!("Buffer {:?}", &buffer[0..n]);
-        info!(logger, "Some formatting string {}", i);
-        let mut buffer = [0; 225];
-        let n = logger.drain(&mut buffer);
-        println!("Buffer {:?}", &buffer[0..n]);
-        info!(logger, "Some formatting string {}", i);
-        let mut buffer = [0; 225];
-        let n = logger.drain(&mut buffer);
-        println!("Buffer {:?}", &buffer[0..n]);
-        info!(logger, "SOME REALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLY long log message {}", i);
-        let mut buffer = [0; 225];
-        let n = logger.drain(&mut buffer);
-        println!("Buffer {:?}", &buffer[0..n]);
-        info!(logger, "SOME REALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLYREALLY long log message {}", i);
-        let mut buffer = [0; 225];
-        let n = logger.drain(&mut buffer);
-        println!("Buffer {:?}", &buffer[0..n]);
-        panic!()
-    }
+    pub use crate::{
+        debug,
+        error,
+        info,
+        log,
+        serializer::ext::*,
+        trace,
+        warn,
+        Serializable,
+        BUFF_LOGGER,
+    };
 }

@@ -7,6 +7,7 @@
 #![deny(warnings)]
 
 use controller as _; // global logger + panicking-behavior + memory layout
+extern crate logging;
 
 #[rtic::app(
     // TODO: Replace `some_hal::pac` with the path to the PAC
@@ -33,12 +34,13 @@ mod app {
     #[init]
     fn init(_cx: init::Context) -> (Shared, Local) {
         defmt::info!("init");
+        use logging;
 
+        logging::BuffLogger::init();
         // TODO setup monotonic if used
         // let sysclk = { /* clock setup + returning sysclk as an u32 */ };
         // let token = rtic_monotonics::create_systick_token!();
         // rtic_monotonics::systick::Systick::new(cx.core.SYST, sysclk, token);
-
         task1::spawn().ok();
 
         (
