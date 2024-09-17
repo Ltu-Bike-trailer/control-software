@@ -22,6 +22,7 @@ use panic_probe as _;
 pub mod gain_scheduled;
 pub mod logging;
 pub mod pid;
+pub mod protocol;
 pub mod wrapper;
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message

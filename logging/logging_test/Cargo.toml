@@ -1,11 +1,11 @@
 [package]
-name = "logging"
+name = "logging_test"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-cfg-if = "1.0.0"
-statics = { path = "../statics" }
+logging = { path = "../", features = ["info", "can"] }
+
 
 [features]
 
