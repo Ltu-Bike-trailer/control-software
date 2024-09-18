@@ -19,10 +19,13 @@ extern crate logging;
 mod app {
     use core::arch::asm;
 
+    use controller::protocol::{self, ProtocolV1};
+
     // Shared resources go here
     #[shared]
     struct Shared {
         // TODO: Add resources
+        protocol: ProtocolV1,
     }
 
     // Local resources go here
@@ -42,10 +45,12 @@ mod app {
         // let token = rtic_monotonics::create_systick_token!();
         // rtic_monotonics::systick::Systick::new(cx.core.SYST, sysclk, token);
         task1::spawn().ok();
+        let protocol = ProtocolV1::new();
 
         (
             Shared {
                 // Initialization of shared resources go here
+                protocol,
             },
             Local {
                 // Initialization of local resources go here
@@ -64,8 +69,13 @@ mod app {
     }
 
     // TODO: Add tasks
-    #[task(priority = 1)]
+    #[task(priority = 1,shared=[protocol])]
     async fn task1(cx: task1::Context) {
+        cx.shared.protocol.lock(|p| {
+            while let Some(msg) = p.next() {
+                todo!("Send the message somewhere");
+            }
+        });
         defmt::info!("Hello from task1!");
         for i in 0..20 {
             unsafe {

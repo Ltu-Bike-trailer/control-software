@@ -71,6 +71,7 @@ static mut TXQUEUE: [u8; u16::MAX as usize] = [0; u16::MAX as usize];
 /// 8k of receive buffer.
 #[link_section = "RAM2"]
 static mut RXQUEUE: [u8; u16::MAX as usize] = [0; u16::MAX as usize];
+
 #[allow(dead_code)]
 /// Acts as an allocator and parser.
 pub struct ProtocolV1 {
@@ -104,12 +105,15 @@ pub struct ProtocolV1 {
     tx_treap_reclaim: [usize; u16::MAX as usize / 10],
     /// The number of elements in the treap reclaim queue.
     tx_treap_reclaim_queue: usize,
-    /// Index in to the tx treap
-    tx_in_progress: Option<usize>,
-    /// A pointer in to the
-    rx_ptr: usize,
     /// Denotes the framing bit.
     latest: bool,
+
+    /// Denotes the framing bit.
+    latest_rx: bool,
+    /// Carry bit from previous read.
+    carry: Option<u8>,
+    /// Receive buffer size.
+    rx_ptr: usize,
 }
 
 pub struct Buffer<'a> {
@@ -138,9 +142,51 @@ impl<'a> Iterator for Buffer<'a> {
     }
 }
 pub struct OutOfSpace {}
+pub struct ParsingError {}
 
 impl ProtocolV1 {
-    pub fn enqueue(&mut self, priority: usize, message: &mut [u8]) -> Result<(), OutOfSpace> {
+    pub fn new() -> Self {
+        Self {
+            tx_queue: Default::default(),
+            tx_ptr: Default::default(),
+            tx_reclaim: [(0, 0); u16::MAX as usize / 10],
+            tx_reclaim_queue: Default::default(),
+            tx_treap: (0, [(None, None, None, (0, 0, 0)); u16::MAX as usize / 10]),
+            tx_treap_ptr: Default::default(),
+            tx_treap_reclaim: [0; u16::MAX as usize / 10],
+            tx_treap_reclaim_queue: Default::default(),
+            latest: false,
+            latest_rx: false,
+            carry: None,
+            rx_ptr: 0,
+        }
+    }
+
+    pub fn rx(&mut self, data: &[u8]) -> Option<Result<MessageType, ParsingError>> {
+        for el in data {
+            let rx = (el & 0b1000_0000) == 0;
+            if self.latest_rx != rx {
+                todo!("Manage parsing of new packages");
+                self.latest_rx = !self.latest_rx;
+                self.rx_ptr = 0;
+                self.carry = Nones;
+            }
+            let prev_carry = self.carry.replace(*el << 1);
+            if let Some(mut carry) = prev_carry {
+                carry = carry << 1;
+                carry |= (*el & 0b0100_000) << 1;
+                unsafe { TXQUEUE[self.tx_ptr] = carry };
+                self.tx_ptr += 1;
+            }
+        }
+        None
+    }
+
+    pub fn send(&mut self, _message: MessageType) -> Result<(), OutOfSpace> {
+        todo!();
+    }
+
+    fn enqueue(&mut self, priority: usize, message: &mut [u8]) -> Result<(), OutOfSpace> {
         let req = (message.len() * 901) / 800;
 
         // Scan for open regions in the buffer.
@@ -175,14 +221,41 @@ impl ProtocolV1 {
                 if shuffle {
                     break 'outer;
                 }
-                self.tx_ptr += req;
                 // If we could not find any reclaimable space and we cannot fit at the end of
                 // the buffer we are OOM.
                 unsafe {
-                    if self.tx_ptr >= TXQUEUE.len() {
+                    if self.tx_ptr + 1 < TXQUEUE.len() {
+                        self.tx_ptr += req;
+                        break 'outer;
+                    }
+                }
+
+                let mut root = self.tx_treap.0;
+                let (parent, left, right, (prio, start, end)) = self.tx_treap.1[root];
+
+                if prio < priority && end - start > req {
+                    bounds = (start, start + req);
+                    self.tx_treap.1[root] = (parent, left, right, (priority, start, start + req));
+                    self.rotate(root);
+                    break 'outer;
+                } else if end - start > req {
+                    return Err(OutOfSpace {});
+                }
+
+                while let Some(el) = self.left_child(root) {
+                    root = el;
+                    let (parent, left, right, (prio, start, end)) = self.tx_treap.1[root];
+                    if prio < priority && end - start > req {
+                        bounds = (start, start + req);
+                        self.tx_treap.1[root] =
+                            (parent, left, right, (priority, start, start + req));
+                        self.rotate(root);
+                        break 'outer;
+                    } else if end - start > req {
                         return Err(OutOfSpace {});
                     }
                 }
+                return Err(OutOfSpace {});
             }
         }
 
