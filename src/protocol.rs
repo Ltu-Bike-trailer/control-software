@@ -71,13 +71,12 @@ static mut TXQUEUE: [u8; u16::MAX as usize] = [0; u16::MAX as usize];
 /// 8k of receive buffer.
 #[link_section = "RAM2"]
 static mut RXQUEUE: [u8; u16::MAX as usize] = [0; u16::MAX as usize];
-
 #[allow(dead_code)]
 /// Acts as an allocator and parser.
 pub struct ProtocolV1 {
-    /// Encodes (priority,start,end) where start and end are elements in the
-    /// TXQUEUE.
-    tx_priority: [(usize, usize, usize); u16::MAX as usize / 10],
+    // /// Encodes (priority,start,end) where start and end are elements in the
+    // /// TXQUEUE.
+    // tx_priority: [(usize, usize, usize); u16::MAX as usize / 10],
     /// Number of elements currently in the transmit queue.
     tx_queue: usize,
     /// Ptr in to the TXQUEUE.
@@ -92,8 +91,19 @@ pub struct ProtocolV1 {
     /// child (tx_treap))
     tx_treap: (
         usize,
-        [(Option<usize>, Option<usize>, usize, Option<usize>); u16::MAX as usize / 10],
+        [(
+            Option<usize>,
+            Option<usize>,
+            Option<usize>,
+            (usize, usize, usize),
+        ); u16::MAX as usize / 10],
     ),
+    /// End of tx_treap.
+    tx_treap_ptr: usize,
+    /// Addresses that are availiable to reclaim in tx_treap.
+    tx_treap_reclaim: [usize; u16::MAX as usize / 10],
+    /// The number of elements in the treap reclaim queue.
+    tx_treap_reclaim_queue: usize,
     /// Index in to the tx treap
     tx_in_progress: Option<usize>,
     /// A pointer in to the
@@ -102,19 +112,44 @@ pub struct ProtocolV1 {
     latest: bool,
 }
 
+pub struct Buffer<'a> {
+    ptr: usize,
+    end: usize,
+    _data: &'a mut ProtocolV1,
+}
+
+impl<'a> Iterator for Buffer<'a> {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.ptr == self.end {
+            return None;
+        }
+        unsafe {
+            if self.ptr >= TXQUEUE.len() {
+                return None;
+            }
+        }
+        unsafe {
+            let ptr = self.ptr;
+            self.ptr += 1;
+            Some(TXQUEUE[ptr])
+        }
+    }
+}
 pub struct OutOfSpace {}
 
 impl ProtocolV1 {
     pub fn enqueue(&mut self, priority: usize, message: &mut [u8]) -> Result<(), OutOfSpace> {
-        let req = message.len();
+        let req = (message.len() * 901) / 800;
 
         // Scan for open regions in the buffer.
         //
         // This is easiest to do
 
+        // Assume that we have to fit the buffer to the end of the frame.
+        let mut bounds = (self.tx_ptr, self.tx_ptr + req);
         if self.tx_reclaim_queue != 0 {
-            // Assume that we have to fit the buffer to the end of the frame.
-            let mut bounds = (self.tx_ptr, self.tx_ptr + req);
             'outer: {
                 let mut shuffle = false;
                 for el in 0..self.tx_reclaim_queue {
@@ -149,34 +184,127 @@ impl ProtocolV1 {
                     }
                 }
             }
-            // TODO: Validate this assumption.
-            //
-            // We assume that the buffer will never actually be full.
-            self.tx_priority[self.tx_queue + 1] = (priority, bounds.0, bounds.1);
-            self.tx_queue += 1;
-            // TODO: Manage framing. 1st bit should indicat buffer byte.
-            let mut queue: u8 = 0;
-            let mut mask = 1;
-            let mut queue_len = 0;
-            let repl = (self.latest as u8) << 7;
-            // I really dislike this framing part.
-            message.iter_mut().for_each(|el| {
-                let old_queue = queue.clone();
-                queue = *el & (mask);
-                mask <<= 1;
-                mask |= 0b1;
-                *el = ((*el & mask) >> 1) | old_queue << queue_len | 0b1000_0000;
-                queue_len += 1;
-            });
-
-            unsafe {
-                TXQUEUE[(bounds.0)..(bounds.1)].copy_from_slice(message);
-            }
         }
-        todo!()
+
+        // TODO: Validate this assumption.
+        //
+        // We assume that the buffer will never actually be full.
+        // self.tx_priority[self.tx_queue + 1] = (priority, bounds.0, bounds.1);
+        // self.tx_queue += 1;
+
+        // TODO: Manage framing. 1st bit should indicat buffer byte.
+        let mut queue: u8 = 0;
+        let mut mask = 1;
+        let mut queue_len = 0;
+        let repl = (self.latest as u8) << 7;
+        let mut lower_bound = bounds.0;
+        // I really dislike this framing part.
+        message.iter_mut().for_each(|el| {
+            // If we have a nother byte, insert that first.
+            if queue_len == 7 {
+                unsafe {
+                    TXQUEUE[lower_bound] = queue | repl;
+                }
+                lower_bound += 1;
+                queue = 0;
+                queue_len = 0;
+                mask = 1;
+            }
+
+            // Extract lsb and place it at the start of
+            let old_queue = queue;
+            queue = (*el & (mask)) << (7 - queue_len);
+            mask <<= 1;
+            mask |= 0b1;
+            unsafe {
+                TXQUEUE[lower_bound] = ((*el & mask) >> queue_len) | old_queue | repl;
+            }
+            queue_len += 1;
+            lower_bound += 1;
+        });
+        unsafe {
+            TXQUEUE[lower_bound] = queue | repl;
+        }
+        self.latest = !self.latest;
+
+        self.insert(priority, bounds.0, bounds.1);
+        Ok(())
     }
 
-    pub fn insert(&mut self, prio: usize, data: &[u8]) {}
+    pub fn insert(&mut self, key: usize, start: usize, end: usize) {
+        if self.tx_treap_ptr == 0 {
+            self.tx_treap.1[0] = (None, None, None, (key, start, end));
+            self.tx_treap_ptr += 1;
+            return;
+        }
+
+        let idx = match &mut self.tx_treap_reclaim_queue {
+            // Allocate :)
+            0 => {
+                let ret = self.tx_treap_ptr;
+                self.tx_treap_ptr += 1;
+                ret
+            }
+            n => {
+                let ret = self.tx_treap_reclaim[*n];
+                *n -= 1;
+                ret
+            }
+        };
+
+        let mut root: usize = self.tx_treap.0;
+
+        loop {
+            if self.get_key(root) >= key {
+                // Left child
+                if let Some(new_root) = self.left_child(root) {
+                    root = new_root;
+                    continue;
+                }
+                self.replace_left_child(root, idx);
+                break;
+            }
+            if let Some(new_root) = self.right_child(root) {
+                root = new_root;
+                continue;
+            }
+            self.replace_right_child(root, idx);
+            break;
+        }
+        self.tx_treap.1[idx] = (Some(root), None, None, (key, start, end));
+
+        self.rotate(idx);
+    }
+
+    /// TODO: Remove nodes. This is done by getting the highest priority
+    /// message.
+    pub fn next<'a>(&'a mut self) -> Buffer<'a> {
+        let mut root = self.tx_treap.0;
+        while let Some(new_node) = self.right_child(root) {
+            root = new_node;
+        }
+
+        if let Some(left) = self.left_child(root) {
+            if let Some(parent) = self.parent(root) {
+                self.tx_treap.1[parent].2 = Some(left);
+            } else {
+                self.set_root(left);
+            }
+        } else {
+            if let Some(parent) = self.parent(root) {
+                self.tx_treap.1[parent].2 = None;
+            }
+        }
+        let new_node = self.tx_treap.1[root];
+
+        self.tx_treap_reclaim[self.tx_treap_ptr] = root;
+        self.tx_reclaim[self.tx_reclaim_queue] = (new_node.3 .1, new_node.3 .2);
+        Buffer {
+            ptr: new_node.3 .1,
+            end: new_node.3 .2,
+            _data: self,
+        }
+    }
 
     // TODO! Handle when ancestor is none. i.e. parent is root.
     fn rotate(&mut self, mut current: usize) {
@@ -200,9 +328,10 @@ impl ProtocolV1 {
             let direction = self.side(current, parent);
 
             if !direction {
+                self.rotate_right(current, parent);
+            } else {
                 self.rotate_left(current, parent);
             }
-            self.rotate_right(current, parent);
             current = parent;
         }
     }
@@ -271,7 +400,7 @@ impl ProtocolV1 {
 
     #[inline(always)]
     fn replace_right_child(&mut self, node: usize, new: usize) -> Option<usize> {
-        self.tx_treap.1[node].3.replace(new)
+        self.tx_treap.1[node].2.replace(new)
     }
 
     #[inline(always)]
@@ -286,7 +415,7 @@ impl ProtocolV1 {
 
     #[inline(always)]
     fn right_child(&self, node: usize) -> Option<usize> {
-        self.tx_treap.1[node].3
+        self.tx_treap.1[node].2
     }
 
     #[inline(always)]
@@ -296,8 +425,7 @@ impl ProtocolV1 {
 
     #[inline(always)]
     fn get_key(&self, node: usize) -> usize {
-        let node = self.tx_treap.1[node];
-        let node = self.tx_priority[node.2];
+        let node = self.tx_treap.1[node].3;
         node.0
     }
 
@@ -306,8 +434,7 @@ impl ProtocolV1 {
     /// Since we want to replace the longest one with the the lowest priority.
     #[inline(always)]
     fn get_priority(&self, node: usize) -> usize {
-        let node = self.tx_treap.1[node];
-        let node = self.tx_priority[node.2];
+        let node = self.tx_treap.1[node].3;
         node.2
             .checked_sub(node.1)
             .expect("Message length out of bounds")

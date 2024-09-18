@@ -65,7 +65,7 @@ mod app {
 
     // TODO: Add tasks
     #[task(priority = 1)]
-    async fn task1(_cx: task1::Context) {
+    async fn task1(cx: task1::Context) {
         defmt::info!("Hello from task1!");
         for i in 0..20 {
             unsafe {
