@@ -37,16 +37,24 @@ enum InstructionCommand {
     RxStatus = 0xB0
 }
 
-/// The MCP2515 modes of operation. 
+/// The MCP2515 modes of operation.
+/* REQOP: Request Operation Mode bits <2:0>
+    000 = Set Normal Operation mode
+    001 = Set Sleep mode
+    010 = Set Loopback mode
+    011 = Set Listen-only mode
+    100 = Set Configuration mode
+*/
+#[repr(u8)]
 pub enum OperationTypes {
-    Configuration,
-    Normal,
-    Sleep,
-    ListenOnly,
-    Loopback,
+    Configuration = 0b100,
+    Normal = 0b000,
+    Sleep = 0b001,
+    ListenOnly = 0b011,
+    Loopback = 0b010,
 }
 
-enum CanBuffer {
+enum TXBN {
     TXB0, //TXB0 - TXB3 = transmit buffers for MCP2515 module-
     TXB1,
     TXB2,
@@ -68,48 +76,72 @@ enum RXFN {
     RXF5,
 }
 
+#[repr(u8)]
+pub enum CLKPRE{
+    DIV1 = 0b00, // System Clock/1
+    DIV2 = 0b01, // System Clock/2
+    DIV4 = 0b10, // System Clock/4
+    DIV8 = 0b11, // System Clock/8
+}
+
+
+#[repr(u8)]
+enum MCP2515Register{
+    CANSTAT = 0x0E,    
+    CANCTRL = 0x0F,
+    CANINTE = 0x2B,
+    CANINTF = 0x2C,
+
+    BFPCTRL = 0x0C,
+    TXRTSCTRL = 0x0D,
+    TEC = 0x1C,
+    REC = 0x1D,
+    CNF1 = 0x2A,
+    CNF2 = 0x29,
+    CNF3 = 0x28,
+    EFLG = 0x2D,
+
+    TXB0CTRL = 0x30,
+    TXB1CTRL = 0x40,
+    TXB2CTRL = 0x50,
+
+    RXB0CTRL = 0x60,
+    RXB1CTRL = 0x70,
+}
+
+
 #[derive(Debug)]
 pub enum CanDriverError{
     SpiError,
     FrameError,
 }
 
-/*
- * Configure the MCP2515 Registers - by writing to its configuration registers via SPI.
- *  - Setup bit timing, filtering, and masks. 
- *  - Initialize and configure TX and RX buffers.
- *  - Enable or disable features such as interrupts as needed on the MCP2515.
- *
- *  The CAN Protocol Engine (reference MCP2515 Data-sheet): 
- *
- *  "The heart of the engine is the Finite State Machine
-    (FSM). The FSM is a sequencer that controls the
-    sequential data stream between the TX/RX shift
-    register, the CRC register and the bus line. The FSM
-    also controls the Error Management Logic (EML) and
-    the parallel data stream between the TX/RX shift
-    registers and the buffers. The FSM ensures that the
-    processes of reception, arbitration, transmission and
-    error-signaling are performed according to the CAN
-    protocol. The automatic retransmission of messages
-    on the bus line is also handled by the FSM".
- */
-pub struct CanModule{
-    settings: CanSettings,
-    //tx_buf: [u8; 8],
-    //rx_buf: [u8; 8],
-}
 
 pub struct CanMessage{
 }
 
-pub struct CanSettings{
-    pub mode: OperationTypes,
-    pub can_clk: u8,
-    pub can_bitrate: u8,
-
+pub struct CanControllSettings{
+    mode: OperationTypes,
+    clken: bool,
+    clkpre: CLKPRE,
+    abat: bool, // ABAT: Abort All Pending Transmission bit
+    osm: bool, // OSM: One-Shot Mode (1 = Enabled, 0 = disabled)
 }
 
+pub struct CanSettings{
+    pub canctrl: CanControllSettings, 
+    pub can_clk: u8,
+    pub can_bitrate: u8,
+}
+
+impl CanControllSettings {
+    pub fn new(mode: OperationTypes, clken: bool, clkpre: CLKPRE, abat: bool, osm: bool) -> Self{
+        Self{
+            mode, clken, clkpre, abat, osm
+        }
+    }
+
+}
 
 impl Frame for CanMessage {
     fn new(id: impl Into<embedded_can::Id>, data: &[u8]) -> Option<Self> {
@@ -191,10 +223,8 @@ impl CanMessage {
 impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin> CanDriver<SPI, PIN>{
 
     pub fn init(spi: SPI, cs: PIN, can_settings: CanSettings) -> Self{
-        //TODO: - Apply the CanSettings below...
-        
         let mut driver = Self{spi, cs};
-        driver.set_mode(can_settings.mode);
+        driver.setup_configuration(can_settings);
         driver    
     }
 
@@ -225,44 +255,70 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin> CanDriver<SPI, PIN>{
         
     }
 
-    fn set_mode(&mut self, mode: OperationTypes){
-        /* The operational mode is selected via the CANCTRL. REQOP bits (see Register 10-1) */
+    fn read_register(&mut self, reg: MCP2515Register) -> Result<u8, SPI::Error>{
+        let mut read_buf: [u8; 2] = [0; 2];
+        let read_msg: [u8; 2] = [InstructionCommand::Read as u8, reg as u8];
         
-        //REQOP: Request Operation Mode bits <2:0>
-        //000 = Set Normal Operation mode
-        //001 = Set Sleep mode
-        //010 = Set Loopback mode
-        //011 = Set Listen-only mode
-        //100 = Set Configuration mode
+        self.cs.set_low();
+        self.spi.transfer(&mut read_buf, &read_msg);
+        self.cs.set_high();
+        Ok(read_buf[1])
+    }
+
+    fn write_register(&mut self, reg: MCP2515Register, data: u8) -> Result<(), SPI::Error>{
+        let reg_address: u8 = reg as u8;
+        let maskbit: u8; 
+        // Expected format: [u8; N] --> [Instruction byte, Address byte, Data byte]
+        let byte_msg: [u8; 3] = [InstructionCommand::Write as u8, reg_address, data];
+
+        self.cs.set_low();
+        self.spi.write(&byte_msg);
+        self.cs.set_high();
+        Ok(())
+    }
+
+    pub fn set_canctrl_register(&mut self, canctrl_settings: CanControllSettings) -> u8 {
+        let mut canctrl_byte = 0u8; // (1): data_byte |= (reg_value << reg_pos)
+        let mode_value: u8 = canctrl_settings.mode as u8; //REQOP[2:0] (bits 7-5)
+        let prescale: u8 = canctrl_settings.clkpre as u8; //CLKPRE[1:0] (bits 1-0)
+        let clk_enabled = canctrl_settings.clken;
        
-        //CANCTRL register address: xxxx 1111
+        defmt::println!("1. canctrl_byte: 0b{:08b}", canctrl_byte);
+        canctrl_byte |= mode_value << 5; //(2)
+        defmt::println!("2. canctrl_byte after mode select: 0b{:08b}", canctrl_byte);
 
-        match mode {
-            OperationTypes::Configuration =>{
-                /*
-                 * Configuration mode is automatically selected
-                 * after power-up, a reset or can be entered from any
-                 * other mode by setting the CANTRL.REQOP bits to ‘100’.
-                 */
-            }
-            OperationTypes::Normal =>{
-                
-            }
-            OperationTypes::Loopback =>{
-
-            }
-            OperationTypes::ListenOnly =>{
-
-            }
-            OperationTypes::Sleep => {
-
-            }
+        if (canctrl_settings.abat == true){
+            canctrl_byte |= 1 << 4;
         }
+
+        if (canctrl_settings.osm == true){
+            canctrl_byte |= 1 << 3;
+        }
+
+        if (clk_enabled == true){
+            canctrl_byte |= 1 << 2;
+        }
+
+        canctrl_byte |= prescale; //(3)
+        defmt::println!("3. canctrl_byte after prescale select: 0b{:08b}", canctrl_byte);
+
+        // 1. canctrl_byte = 0b0000_0000
+        // 2. canctrl_byte = 0b0000_0000 OR (0b0000_0xxx << 5) = 0bxxx0_0000
+        // 3. 0bxxx0_0000 OR 0b0000_00zz = 0bxxx0_00zz
+
+        return canctrl_byte;
     }
 
-    fn get_instruction(&mut self, instruction: InstructionCommand) -> u8{
-        return instruction as u8;
+    /// This would apply and configure the Can controller settings for the module.
+    pub fn setup_configuration(&mut self, can_settings: CanSettings){
+        let canctrl_byte = self.set_canctrl_register(can_settings.canctrl);
+        
+        defmt::info!("CANCTRL register settings value: 0b{:08b}", canctrl_byte);
+        self.write_register(MCP2515Register::CANCTRL, canctrl_byte);
+    
+        //TODO: - Write other relevant register settings below... 
     }
+
 
     fn transmit_can(&mut self, can_msg: &CanMessage){
         //Pull the CS pin LOW.
@@ -290,20 +346,19 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin> CanDriver<SPI, PIN>{
 
     /// Logic for transferring messages to the RXBn buffers only if acceptance filter criteria is
     /// met. Where the messages is handled in the Message Assembly Buffer (MAB).
-    fn message_acceptance(){}
+    fn message_acceptance(){
 
-
-    fn create_instruction(&mut self, instruction: InstructionCommand, address_byte: u8, data_byte: u8) -> [u8; 4] {
-        /*The MCP2515 has a 8-bit address (A7 through A0) */
-
-        let byte_instruct = self.get_instruction(instruction);
-        let byte_msg: [u8; 4] = [byte_instruct, address_byte, data_byte, 0x0];
-        return byte_msg;
     }
 
     fn initiate_transmission(&mut self, instruction: InstructionCommand, address_byte: u8){
         // 1. Need to set the TXBnCTRL.TXREQ bit for each buffer
         // 2. Configure using the TXRTSCTRL register (need to be in 'configuration mode').
+        // Format: [u8; N] --> [Instruction byte, Address byte, Data byte]
+        
+        //self.cs.set_low();
+        //let byte_msg = self.create_instruction(instruction, address_byte, 0b0100_0100);
+        //self.spi.write(&byte_msg);
+        
     }
 
 
