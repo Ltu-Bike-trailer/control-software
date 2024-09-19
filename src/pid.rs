@@ -685,4 +685,3 @@ impl DoubleSize for f32 {
         Ok(value as f32)
     }
 }
-
