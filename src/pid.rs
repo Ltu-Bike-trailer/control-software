@@ -8,12 +8,17 @@ use core::{
 };
 
 use arraydeque::ArrayDeque;
+use sealed::{CmpExt, Convert};
 
 /// Provides a light weight interface for setting the output of a value
 pub trait Channel<Error: Debug> {
     /// The value type that the channel accepts.
     type Output: Sized;
     /// Sets the output value for the type.
+    /// 
+    /// # Errors
+    /// 
+    /// May return an error if the underlying hardware returns an error.
     fn set(&mut self, value: Self::Output) -> Result<(), Error>;
 }
 
@@ -30,6 +35,8 @@ pub trait DoubleSize {
 
     /// Halves the size of the value.
     ///
+    /// # Errors
+    /// 
     /// Returns error if the value does not fit.
     fn half_size(value: Self::Ret) -> Result<Self, Self::Error>
     where
@@ -77,7 +84,7 @@ pub struct Pid<
 }
 
 /// This assumes that we have a i32 as data.
-pub struct PidDynamic<
+pub struct Dynamic<
     Error: Debug,
     Interface: Channel<Error>,
     Output: Sized,
@@ -102,7 +109,7 @@ pub struct PidDynamic<
 
 /// Wraps the info about a specific time step in the control sequence.
 #[derive(Debug, defmt::Format)]
-pub struct ControlInfo<Output: Sized + defmt::Format> {
+pub struct ControlInfo<Output: Sized> {
     /// The expected value.
     pub reference: Output,
     /// The actual value read from the [`Channel`].
@@ -195,6 +202,11 @@ where
     /// Computes the control signal using a PID control strategy.
     ///
     /// if successful it returns the expected value and the read value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying actuation channel returns an error.
+    /// Or if the PID computations return an error.
     pub fn actuate_rate_limited(
         &mut self,
         rate_limit: Output,
@@ -225,6 +237,11 @@ where
     /// Computes the control signal using a PID control strategy.
     ///
     /// if successful it returns the expected value and the read value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying actuation channel returns an error.
+    /// Or if the PID computations return an error.
     pub fn actuate(
         &mut self,
     ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>>
@@ -315,7 +332,7 @@ impl<
         const TIMESCALE: i32,
         const FIXED_POINT: u32,
     >
-    PidDynamic<
+    Dynamic<
         Error,
         Interface,
         Output,
@@ -376,6 +393,11 @@ where
     /// Computes the control signal using a PID control strategy.
     ///
     /// if successful it returns the expected value and the read value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying actuation channel returns an error.
+    /// Or if the PID computations return an error.
     pub fn actuate_rate_limited(
         &mut self,
         rate_limit: Output,
@@ -407,6 +429,11 @@ where
     /// Computes the control signal using a PID control strategy.
     ///
     /// if successful it returns the expected value and the read value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying actuation channel returns an error.
+    /// Or if the PID computations return an error.
     pub fn actuate(
         &mut self,
         ts: u64,
@@ -563,9 +590,9 @@ macro_rules! pid {
 pub mod prelude {
 
     impl Channel<()> for f32 {
-        type Output = f32;
+        type Output = Self;
 
-        fn set(&mut self, value: f32) -> Result<(), ()> {
+        fn set(&mut self, value: Self) -> Result<(), ()> {
             *self = value;
             Ok(())
         }
@@ -587,14 +614,15 @@ mod sealed {
         fn convert(self) -> Result<Dest, Self::Error>;
     }
 
-    impl Convert<i32> for i32 {
+    impl Convert<Self> for i32 {
         type Error = Infallible;
 
-        fn convert(self) -> Result<i32, Self::Error> {
+        fn convert(self) -> Result<Self, Self::Error> {
             Ok(self)
         }
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     impl Convert<i32> for u64 {
         type Error = Infallible;
 
@@ -603,6 +631,7 @@ mod sealed {
         }
     }
 
+    #[allow(clippy::cast_precision_loss)]
     impl Convert<f32> for u64 {
         type Error = Infallible;
 
@@ -610,7 +639,7 @@ mod sealed {
             Ok(self as f32)
         }
     }
-
+    #[allow(clippy::cast_precision_loss)]
     impl Convert<f32> for i32 {
         type Error = Infallible;
 
@@ -623,19 +652,19 @@ mod sealed {
         where
             Self: PartialOrd<Self> + Sized,
         {
-            match self > other {
-                true => self,
-                false => other,
+            if self < other {
+                return other;
             }
+            self
         }
         fn min(self, other: Self) -> Self
         where
             Self: PartialOrd<Self> + Sized,
         {
-            match self < other {
-                true => self,
-                false => other,
+            if self >= other {
+                return other;
             }
+            self
         }
     }
 
@@ -656,7 +685,6 @@ mod sealed {
         }
     }
 }
-use sealed::*;
 
 impl DoubleSize for i32 {
     type Error = ();
@@ -682,10 +710,11 @@ impl DoubleSize for f32 {
         self.into()
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     fn half_size(value: Self::Ret) -> Result<Self, Self::Error>
     where
         Self: Sized,
     {
-        Ok(value as f32)
+        Ok(value as Self)
     }
 }

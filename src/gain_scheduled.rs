@@ -111,30 +111,20 @@ impl<
 {
     /// Creates a new controller that sets the output on the
     /// [`Interface`](`Channel`) using a PID control strategy.
-    pub fn new(
-        channel: Interface,
-        params: [ParamsStore; REGIONS],
-    ) -> GainScheduler<
-        Error,
-        Interface,
-        ParamsStore,
-        REGIONS,
-        THRESHOLD_MAX,
-        THRESHOLD_MIN,
-        TIMESCALE,
-        FIXED_POINT,
-    > {
+    ///
+    /// # Panics
+    ///
+    /// Panics if the regions are not provided in order.
+    pub fn new(channel: Interface, params: [ParamsStore; REGIONS]) -> Self {
         let mut index_map = [(0., 0); REGIONS];
         let mut prev_thresh = f32::MIN;
         for (idx, el) in params.iter().enumerate() {
-            if el.get_min() <= prev_thresh {
-                panic!()
-            }
+            assert!(el.get_min() <= prev_thresh);
             prev_thresh = el.get_min();
             index_map[idx] = (prev_thresh, idx);
         }
 
-        GainScheduler {
+        Self {
             index_map,
             parameters: params,
             prev_time: 0,
@@ -193,18 +183,28 @@ impl<
     /// Computes the control signal using a PID control strategy.
     ///
     /// if successful it returns the expected value and the read value.
-    pub fn actuate(&mut self) -> Result<ControlInfo<f32>, ()> {
-        let output = self.compute_output()?;
+    ///
+    /// # Errors
+    ///
+    /// This function may throw an error if the underlying [`Channel`]
+    /// throws an error.
+    pub fn actuate(&mut self) -> Result<ControlInfo<f32>, Error> {
+        let output = self.compute_output();
         info!("Applying {:?}", output);
 
-        self.interface.set(output.actuation).unwrap();
+        self.interface.set(output.actuation)?;
         self.previous_actuation = output.actuation;
 
         Ok(output)
     }
 
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
     /// Computes the output using normal PID calculations.
-    pub fn compute_output(&mut self) -> Result<ControlInfo<f32>, ()> {
+    ///
+    /// # Errors
+    ///
+    /// This function can throw an error if the
+    pub fn compute_output(&mut self) -> ControlInfo<f32> {
         let target: f32 = self.reference;
 
         let gain = self.get_gain();
@@ -228,7 +228,7 @@ impl<
         let p = error * kp;
 
         // Integral is approximated as a sum of discrete signals.
-        let avg = self.previous_error as f64 + error as f64;
+        let avg = f64::from(self.previous_error) + f64::from(error);
         self.integral += ((avg / 2.) as f32) * ts / time_scale;
 
         self.integral = self.integral.max(threshold_min).min(threshold_max);
@@ -244,7 +244,7 @@ impl<
             .max(threshold_min)
             .min(threshold_max);
 
-        Ok(ControlInfo {
+        ControlInfo {
             reference: target,
             measured: actual,
             actuation: output,
@@ -252,6 +252,6 @@ impl<
             i,
             d,
             pre_threshold: (p + i + d) / fixed_point,
-        })
+        }
     }
 }

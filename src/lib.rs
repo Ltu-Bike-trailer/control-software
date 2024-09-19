@@ -62,7 +62,7 @@ pub struct OwnedItterator<Item: Sized + Clone, const SIZE: usize> {
 
 #[allow(dead_code)]
 impl<Item: Sized + Clone, const SIZE: usize> OwnedItterator<Item, SIZE> {
-    fn new(buff: [Item; SIZE]) -> Self {
+    const fn new(buff: [Item; SIZE]) -> Self {
         Self { buff, ptr: 0 }
     }
 }
