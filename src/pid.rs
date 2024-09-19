@@ -15,9 +15,9 @@ pub trait Channel<Error: Debug> {
     /// The value type that the channel accepts.
     type Output: Sized;
     /// Sets the output value for the type.
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// May return an error if the underlying hardware returns an error.
     fn set(&mut self, value: Self::Output) -> Result<(), Error>;
 }
@@ -36,7 +36,7 @@ pub trait DoubleSize {
     /// Halves the size of the value.
     ///
     /// # Errors
-    /// 
+    ///
     /// Returns error if the value does not fit.
     fn half_size(value: Self::Ret) -> Result<Self, Self::Error>
     where
