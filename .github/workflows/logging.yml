@@ -20,10 +20,6 @@ on:
 
 name: Check and Lint for the logging framework
 
-defaults:
-  run:
-    working-directory: 
-      "../logging"
 
 jobs:
   clippy:
@@ -38,6 +34,7 @@ jobs:
           override: true
       - name: cargo_check
         run: |
+          cd logging
           rustup toolchain install nightly-2024-04-07 --force
           rustup target add thumbv7em-none-eabihf
           cargo +nightly clippy
@@ -55,6 +52,7 @@ jobs:
           override: true
       - name: cargo_check
         run: |
+          cd logging
           rustup toolchain install nightly-2024-04-07 --force
           rustup target add thumbv7em-none-eabihf
           cargo +nightly check
@@ -72,6 +70,7 @@ jobs:
           override: true
       - name: fmt check
         run: |
+          cd logging
           rustup toolchain install nightly-2024-04-07 --force
           rustup component add rustfmt
           cargo +nightly fmt --all -- --check
@@ -89,6 +88,7 @@ jobs:
           override: true
       - name: cargo_check
         run: |
+          cd logging
           rustup toolchain install nightly-2024-04-07 --force
           rustup target add thumbv7em-none-eabihf
           ls -la
@@ -108,6 +108,7 @@ jobs:
           override: true
       - name: cargo_check
         run: |
+          cd logging
           rustup toolchain install nightly-2024-04-07 --force
           rustup target add thumbv7em-none-eabihf
           ls -la
