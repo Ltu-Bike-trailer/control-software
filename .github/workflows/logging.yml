@@ -30,15 +30,11 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
       - name: cargo_check
         run: |
-          pwd
-          cd logging
-          rustup toolchain install nightly-2024-04-07 --force
-          rustup target add thumbv7em-none-eabihf
-          rustup target list
+          cd ../logging
           cargo +nightly clippy
           cargo +nightly clippy --examples
   check:
@@ -50,13 +46,11 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
       - name: cargo_check
         run: |
-          cd logging
-          rustup toolchain install nightly-2024-04-07 --force
-          rustup target add thumbv7em-none-eabihf
+          cd ../logging
           cargo +nightly check
           cargo +nightly check --examples
 
@@ -68,17 +62,15 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
       - name: fmt check
         run: |
-          cd logging
-          rustup toolchain install nightly-2024-04-07 --force
+          cd ../logging
           rustup component add rustfmt
           cargo +nightly fmt --all -- --check
 
   build:
-    needs: [check, clippy]
     name: build
     runs-on: ubuntu-latest
     steps:
@@ -86,19 +78,16 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
       - name: cargo_check
         run: |
-          cd logging
-          rustup toolchain install nightly-2024-04-07 --force
-          rustup target add thumbv7em-none-eabihf
+          cd ../logging
           ls -la
           cargo +nightly build --release
           cargo +nightly build --examples --release
 
   test:
-    needs: [check, clippy]
     name: build
     runs-on: ubuntu-latest
     steps:
@@ -106,12 +95,10 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
       - name: cargo_check
         run: |
-          cd logging
-          rustup toolchain install nightly-2024-04-07 --force
-          rustup target add thumbv7em-none-eabihf
+          cd ../logging
           ls -la
           cargo +nightly build test
