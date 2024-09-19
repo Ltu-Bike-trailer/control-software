@@ -41,6 +41,22 @@ jobs:
           rustup target list
           cargo +nightly clippy --target  thumbv7em-none-eabihf
           cargo +nightly clippy --examples --target  thumbv7em-none-eabihf
+  doc:
+    name: Generate docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          override: true
+          target: thumbv7em-none-eabihf
+          components: clippy
+      - name: doc check
+        run: |
+          rustup target list
+          cargo +nightly doc
   check:
     name: Check
     runs-on: ubuntu-latest
