@@ -32,12 +32,11 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
+          target: thumbv7em-none-eabihf
       - name: cargo_check
         run: |
-          rustup toolchain install nightly-2024-04-07 --force
-          rustup target add thumbv7em-none-eabihf
           rustup target list
           cargo +nightly clippy --target  thumbv7em-none-eabihf
           cargo +nightly clippy --examples --target  thumbv7em-none-eabihf
@@ -50,12 +49,11 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
+          target: thumbv7em-none-eabihf
       - name: cargo_check
         run: |
-          rustup toolchain install nightly-2024-04-07 --force
-          rustup target add thumbv7em-none-eabihf
           cargo +nightly check
           cargo +nightly check --examples
 
@@ -67,13 +65,12 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
+          target: thumbv7em-none-eabihf
       - name: fmt check
         run: |
-          rustup toolchain install nightly-2024-04-07 --force
           rustup component add rustfmt
-          rustup target add thumbv7em-none-eabihf
           cargo +nightly fmt --all -- --check
 
   build:
@@ -85,12 +82,11 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
+          target: thumbv7em-none-eabihf
       - name: cargo_check
         run: |
-          rustup toolchain install nightly-2024-04-07 --force
-          rustup target add thumbv7em-none-eabihf
           ls -la
           cargo +nightly build --release
           cargo +nightly build --examples --release
