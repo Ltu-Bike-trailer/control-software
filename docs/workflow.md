@@ -3,7 +3,7 @@
 For this project we will be using github and github actions to ensure that the every ones contributions follows the same standards
 and that the code is tested.
 
-## [Issues](https://github.com/ivario123/E7012E_software/issues)
+## [Issues](https://github.com/Ltu-Bike-trailer/control-software/issues)
 
 While issues sounds like something has to be wrong it is merely a mechanism for tracking discussions or tasks.
 A task should be self contained, i.e. it can be worked on without needing to complete parts of any other tasks.
@@ -18,7 +18,7 @@ The issues can also be used as discussion forums, say that we want to decide on 
 while this can be discussed in another forum it might be good to be able to see our reasoning for this choice in the future if we
 ever change our mind.
 
-## [github projects](https://github.com/users/ivario123/projects/4)
+## [github projects](https://github.com/orgs/Ltu-Bike-trailer/projects/1)
 
 This is a simple overview of the tasks and what groups they fit in to, this allows us to plan out issues and distribute them in an efficient manner.
 It also allows us to sort the tasks in to so called stories, while this might not be needed it is a nice to have.
@@ -139,7 +139,7 @@ Now both changes to the file will be included.
 ### [Continuous testing](https://docs.github.com/en/actions/using-workflows)
 
 To ensure that all changes follow the same patterns and produce the expected results we use continuous testing, this means that as soon as a pull request is
-opened ( in to main ) the server runs a set of tests that ensure that we follow the same patters everywhere in the code and that any and all tests in the code
+opened ( in to main ) the server runs a set of tests that ensure that we follow the same patterns everywhere in the code and that any and all tests in the code
 base pass with flying colors. This allows the reviewers to be more sure that the code is correct before merging it in to the main history, and hopefully
 it means that the code in the main branch always works and looks good.
 

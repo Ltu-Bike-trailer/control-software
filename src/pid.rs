@@ -17,6 +17,9 @@ pub trait Channel<Error: Debug> {
     fn set(&mut self, value: Self::Output) -> Result<(), Error>;
 }
 
+/// Denotes that a type can be double in size.
+///
+/// This is used for our fixed point arithemetics.
 pub trait DoubleSize {
     /// A type with double the size of self.
     type Ret: Sized;
@@ -556,6 +559,7 @@ macro_rules! pid {
     }};
 }
 
+/// Re-exports everything needed to use the [`Pid`] controller.
 pub mod prelude {
 
     impl Channel<()> for f32 {

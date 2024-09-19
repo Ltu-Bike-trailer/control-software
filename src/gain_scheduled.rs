@@ -5,27 +5,43 @@ use defmt::info;
 
 use crate::pid::{Channel, ControlInfo};
 
+/// Denotes that a structure can be used as a set of PID parameters.
 pub trait PidParams<const FIXED_POINT: u32>: Copy {
+    /// Returns the proportional gain.
     fn get_kp(&self) -> i32;
 
+    /// Returns the integral gain.
     fn get_ki(&self) -> i32;
 
+    /// Returns the derivative gain.
     fn get_kd(&self) -> i32;
 
+    /// Returns the lower bound for this parameter set.
     fn get_min(&self) -> f32;
 
+    /// Returns the upper bound for this parameter set.
     fn get_max(&self) -> f32;
 }
 
+/// A simple set of PID parameters.
 #[derive(Copy, Clone)]
 pub struct GainParams<const FIXED_POINT: u32> {
+    /// Proportional gain.
     pub kp: i32,
+    /// Integral gain.
     pub ki: i32,
+    /// Derivative gain.
     pub kd: i32,
+    /// Upper bound for these parameters.
     pub max_value: f32,
+    /// Lower bound for these parameters.
     pub min_value: f32,
 }
 
+/// A gain scheduled PID controller.
+///
+/// This means that given a set of [`PidParams`] it will adapt its gain
+/// values depending on the measurement.
 pub struct GainScheduler<
     Error: Debug,
     Interface: Channel<Error, Output = f32>,
@@ -134,19 +150,25 @@ impl<
         }
     }
 
+    /// Registers a new reference value to follow.
     pub fn follow(&mut self, reference: f32) {
         self.reference = reference;
     }
 
+    /// Sets the gain region used.
     pub fn set_bucket(&mut self, bucketer: f32) {
         self.bucketer = bucketer;
     }
 
+    /// Registers a new measurement.
+    ///
+    /// Composed of a (measurement, and a timestamp).
     pub fn register_measurement(&mut self, measurement: (f32, u64)) {
         self.prev_time = self.measurement.1;
         self.measurement = measurement;
     }
 
+    /// Returns the current gain.
     pub fn get_gain(&self) -> ParamsStore {
         let mut min_idx = 0;
 
@@ -181,6 +203,7 @@ impl<
         Ok(output)
     }
 
+    /// Computes the output using normal PID calculations.
     pub fn compute_output(&mut self) -> Result<ControlInfo<f32>, ()> {
         let target: f32 = self.reference;
 
