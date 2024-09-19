@@ -5,27 +5,43 @@ use defmt::info;
 
 use crate::pid::{Channel, ControlInfo};
 
+/// Denotes that a structure can be used as a set of PID parameters.
 pub trait PidParams<const FIXED_POINT: u32>: Copy {
+    /// Returns the proportional gain.
     fn get_kp(&self) -> i32;
 
+    /// Returns the integral gain.
     fn get_ki(&self) -> i32;
 
+    /// Returns the derivative gain.
     fn get_kd(&self) -> i32;
 
+    /// Returns the lower bound for this parameter set.
     fn get_min(&self) -> f32;
 
+    /// Returns the upper bound for this parameter set.
     fn get_max(&self) -> f32;
 }
 
+/// A simple set of PID parameters.
 #[derive(Copy, Clone)]
 pub struct GainParams<const FIXED_POINT: u32> {
+    /// Proportional gain.
     pub kp: i32,
+    /// Integral gain.
     pub ki: i32,
+    /// Derivative gain.
     pub kd: i32,
+    /// Upper bound for these parameters.
     pub max_value: f32,
+    /// Lower bound for these parameters.
     pub min_value: f32,
 }
 
+/// A gain scheduled PID controller.
+///
+/// This means that given a set of [`PidParams`] it will adapt its gain
+/// values depending on the measurement.
 pub struct GainScheduler<
     Error: Debug,
     Interface: Channel<Error, Output = f32>,
@@ -95,30 +111,20 @@ impl<
 {
     /// Creates a new controller that sets the output on the
     /// [`Interface`](`Channel`) using a PID control strategy.
-    pub fn new(
-        channel: Interface,
-        params: [ParamsStore; REGIONS],
-    ) -> GainScheduler<
-        Error,
-        Interface,
-        ParamsStore,
-        REGIONS,
-        THRESHOLD_MAX,
-        THRESHOLD_MIN,
-        TIMESCALE,
-        FIXED_POINT,
-    > {
+    ///
+    /// # Panics
+    ///
+    /// Panics if the regions are not provided in order.
+    pub fn new(channel: Interface, params: [ParamsStore; REGIONS]) -> Self {
         let mut index_map = [(0., 0); REGIONS];
         let mut prev_thresh = f32::MIN;
         for (idx, el) in params.iter().enumerate() {
-            if el.get_min() <= prev_thresh {
-                panic!()
-            }
+            assert!(el.get_min() <= prev_thresh);
             prev_thresh = el.get_min();
             index_map[idx] = (prev_thresh, idx);
         }
 
-        GainScheduler {
+        Self {
             index_map,
             parameters: params,
             prev_time: 0,
@@ -134,19 +140,25 @@ impl<
         }
     }
 
+    /// Registers a new reference value to follow.
     pub fn follow(&mut self, reference: f32) {
         self.reference = reference;
     }
 
+    /// Sets the gain region used.
     pub fn set_bucket(&mut self, bucketer: f32) {
         self.bucketer = bucketer;
     }
 
+    /// Registers a new measurement.
+    ///
+    /// Composed of a (measurement, and a timestamp).
     pub fn register_measurement(&mut self, measurement: (f32, u64)) {
         self.prev_time = self.measurement.1;
         self.measurement = measurement;
     }
 
+    /// Returns the current gain.
     pub fn get_gain(&self) -> ParamsStore {
         let mut min_idx = 0;
 
@@ -171,17 +183,28 @@ impl<
     /// Computes the control signal using a PID control strategy.
     ///
     /// if successful it returns the expected value and the read value.
-    pub fn actuate(&mut self) -> Result<ControlInfo<f32>, ()> {
-        let output = self.compute_output()?;
+    ///
+    /// # Errors
+    ///
+    /// This function may throw an error if the underlying [`Channel`]
+    /// throws an error.
+    pub fn actuate(&mut self) -> Result<ControlInfo<f32>, Error> {
+        let output = self.compute_output();
         info!("Applying {:?}", output);
 
-        self.interface.set(output.actuation).unwrap();
+        self.interface.set(output.actuation)?;
         self.previous_actuation = output.actuation;
 
         Ok(output)
     }
 
-    pub fn compute_output(&mut self) -> Result<ControlInfo<f32>, ()> {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    /// Computes the output using normal PID calculations.
+    ///
+    /// # Errors
+    ///
+    /// This function can throw an error if the
+    pub fn compute_output(&mut self) -> ControlInfo<f32> {
         let target: f32 = self.reference;
 
         let gain = self.get_gain();
@@ -205,7 +228,7 @@ impl<
         let p = error * kp;
 
         // Integral is approximated as a sum of discrete signals.
-        let avg = self.previous_error as f64 + error as f64;
+        let avg = f64::from(self.previous_error) + f64::from(error);
         self.integral += ((avg / 2.) as f32) * ts / time_scale;
 
         self.integral = self.integral.max(threshold_min).min(threshold_max);
@@ -221,7 +244,7 @@ impl<
             .max(threshold_min)
             .min(threshold_max);
 
-        Ok(ControlInfo {
+        ControlInfo {
             reference: target,
             measured: actual,
             actuation: output,
@@ -229,6 +252,6 @@ impl<
             i,
             d,
             pre_threshold: (p + i + d) / fixed_point,
-        })
+        }
     }
 }

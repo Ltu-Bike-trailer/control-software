@@ -17,16 +17,18 @@ pub trait Exti32 {
 }
 
 impl Degrees {
+    #[must_use]
     /// Unwraps the type returning the underlying value.
-    pub fn consume(self) -> i32 {
+    pub const fn consume(self) -> i32 {
         self.0
     }
 }
 
 #[allow(dead_code)]
 impl Radians {
+    #[must_use]
     /// Unwraps the type returning the underlying value.
-    pub fn consume(self) -> i32 {
+    pub const fn consume(self) -> i32 {
         self.0
     }
 }
@@ -42,21 +44,23 @@ impl Exti32 for i32 {
 }
 
 impl From<Radians> for Degrees {
+    #[allow(clippy::cast_possible_truncation)]
     fn from(value: Radians) -> Self {
         // Approximate coercion.
         //
         // This is not entirely correct but it is correct enough
-        let value = (value.0 as i64 * 180 * 10000 / 31415) as i32;
+        let value = (i64::from(value.0) * 180 * 10000 / 31415) as i32;
         Self(value)
     }
 }
 
 impl From<Degrees> for Radians {
+    #[allow(clippy::cast_possible_truncation)]
     fn from(value: Degrees) -> Self {
         // Approximate coercion.
         //
         // This is not entirely correct but it is correct enough
-        let value = ((value.0 as i64 * 31415 / 100) / 1000) as i32;
+        let value = ((i64::from(value.0) * 31415 / 100) / 1000) as i32;
         Self(value)
     }
 }

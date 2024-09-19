@@ -7,11 +7,18 @@
 
 #![no_main]
 #![no_std]
-#![deny(warnings)]
 #![feature(async_fn_traits)]
 #![feature(async_closure)]
-//#![deny(missing_docs)]
-#![deny(clippy::all)]
+#![deny(
+    warnings,
+    missing_docs,
+    clippy::all,
+    clippy::pedantic,
+    clippy::nursery,
+    rustdoc::all,
+    rust_2018_idioms,
+    rust_2024_compatibility
+)]
 #![allow(clippy::manual_range_contains)]
 use core::sync::atomic::{AtomicUsize, Ordering};
 
@@ -48,6 +55,7 @@ pub fn exit() -> ! {
 }
 
 #[derive(Clone)]
+/// A simple iterator of fixed size.
 pub struct OwnedItterator<Item: Sized + Clone, const SIZE: usize> {
     buff: [Item; SIZE],
     ptr: usize,
@@ -55,7 +63,7 @@ pub struct OwnedItterator<Item: Sized + Clone, const SIZE: usize> {
 
 #[allow(dead_code)]
 impl<Item: Sized + Clone, const SIZE: usize> OwnedItterator<Item, SIZE> {
-    fn new(buff: [Item; SIZE]) -> Self {
+    const fn new(buff: [Item; SIZE]) -> Self {
         Self { buff, ptr: 0 }
     }
 }
