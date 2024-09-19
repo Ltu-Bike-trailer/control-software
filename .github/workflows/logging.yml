@@ -34,11 +34,12 @@ jobs:
           override: true
       - name: cargo_check
         run: |
+          ls -l
+          ls -l ../
           cd ../logging
           cargo +nightly clippy
           cargo +nightly clippy --examples
   check:
-    needs: [clippy]
     name: Check
     runs-on: ubuntu-latest
     steps:
