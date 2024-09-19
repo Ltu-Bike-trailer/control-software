@@ -23,7 +23,7 @@ name: Check and Lint for the logging framework
 defaults:
   run:
     working-directory: 
-      "logging"
+      "../logging"
 
 jobs:
   clippy:
