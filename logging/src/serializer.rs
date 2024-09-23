@@ -12,11 +12,15 @@ pub mod ext {
 
             const BUFFER_SIZE: usize = {$size + 1};
 
-            fn from_bytes<'a>(ptr: usize, input: &'a mut [u8]) -> Result<(usize, Self), Self::Error>
+            fn from_bytes<'a,I:Iterator<Item= u8>>(input: &'a mut I) -> Result<Self, Self::Error>
             where
                 Self: Sized,
             {
-                match input.get(0).ok_or(IntegerConversionError::InsufficientBytes)? {
+                let denom = match input.next() {
+                    Some(denom) => denom,
+                    None => return Err(IntegerConversionError::InsufficientBytes)
+                };
+                match denom {
                     $type_idx => {},
                     _ => {
                         return Err(IntegerConversionError::InvalidTypeIdx)
@@ -24,23 +28,20 @@ pub mod ext {
                 }
                 let mut data: [u8; $size] = [0; $size];
                 for idx in 0..(Self::BUFFER_SIZE) {
-                    data[idx] = input
-                        .get(idx + 1)
-                        .ok_or(IntegerConversionError::InsufficientBytes)?
-                        .clone();
+                    let next = match input.next() {
+                        Some(val) => val,
+                        None => return Err(IntegerConversionError::InsufficientBytes)
+                    };
+                    data[idx] = next;
                 }
-                Ok((Self::BUFFER_SIZE, Self::from_le_bytes(data)))
+                Ok(Self::from_le_bytes(data))
             }
 
-            fn into_bytes<'a>(&'a self) -> (usize, [u8; Self::BUFFER_SIZE]) {
+            fn into_bytes<'a,F:FnMut(u8)>(&'a self,mut write:&mut F) {
 
-                let mut data: [u8; Self::BUFFER_SIZE] = [$type_idx; Self::BUFFER_SIZE];
-                let buffer = self.to_le_bytes();
-                for idx in 0..($size) {
-                    data[idx] = buffer
-                        .get(idx).unwrap().clone()
-                }
-                (Self::BUFFER_SIZE, data)
+                write($type_idx);
+
+                self.to_le_bytes().iter().for_each(|el| write(*el));
             }
         })*
     };
@@ -53,6 +54,8 @@ pub mod ext {
         5 : i8 : 1;
         6 : i16 : 2;
         7 : i32 : 4;
-        8 : i64 : 8
+        8 : i64 : 8;
+        9 : f32 : 4;
+        10 : f64 : 8
     );
 }

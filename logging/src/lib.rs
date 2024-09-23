@@ -33,7 +33,12 @@ pub struct BuffLogger {
 
 pub static mut BUFF_LOGGER: MaybeUninit<BuffLogger> = MaybeUninit::uninit();
 
-pub struct Logger<
+pub trait Logger<I1: Iterator<Item = u8>, I2: Iterator<Item = u8>> {
+    fn combiner(&mut self, level: LogLevel, hash: u32, name: I1, args: I2);
+    fn init() -> Self;
+}
+
+/*pub struct Logger<
     'buffers,
     'ret,
     F: FnMut(LogLevel, &'buffers [u8], u32, &'buffers [u8]) -> (&'ret [u8], usize),
@@ -41,16 +46,10 @@ pub struct Logger<
     pub combiner: F,
     pub data: PhantomData<&'buffers PhantomData<()>>,
     pub retdata: PhantomData<&'ret PhantomData<()>>,
-}
+}*/
 
 impl BuffLogger {
-    pub fn init<
-        'buffers,
-        'ret,
-        F: FnMut(LogLevel, &'buffers [u8], u32, &'buffers [u8]) -> (&'ret [u8], usize),
-    >(
-        combiner: F,
-    ) -> Logger<'buffers, 'ret, F> {
+    pub fn init<I1: Iterator<Item = u8>, I2: Iterator<Item = u8>, L: Logger<I1, I2>>() -> L {
         unsafe {
             BUFF_LOGGER = MaybeUninit::new(BuffLogger {
                 format_hash: [0; 100],
@@ -61,11 +60,7 @@ impl BuffLogger {
                 buffer_count: 0,
             });
         }
-        Logger {
-            combiner,
-            data: PhantomData,
-            retdata: PhantomData,
-        }
+        L::init()
     }
 
     pub fn name_or_hash<'a>(
@@ -114,7 +109,8 @@ impl BuffLogger {
         ret
     }
 }
-impl<
+
+/*impl<
         'buffers,
         'ret,
         F: FnMut(LogLevel, &'buffers [u8], u32, &'buffers [u8]) -> (&'ret [u8], usize),
@@ -127,14 +123,14 @@ impl<
             buffer.drain(data)
         }
     }
-}
+}*/
 
 pub trait Serializable {
     const BUFFER_SIZE: usize;
     type Error: Sized;
     /// Returns number of bytes used and buffer.
-    fn into_bytes<'a>(&'a self) -> (usize, [u8; Self::BUFFER_SIZE]);
-    fn from_bytes<'a>(ptr: usize, data: &'a mut [u8]) -> Result<(usize, Self), Self::Error>
+    fn into_bytes<'a, F: FnMut(u8)>(&'a self, writer: &mut F);
+    fn from_bytes<'a, I: Iterator<Item = u8>>(data: &'a mut I) -> Result<Self, Self::Error>
     where
         Self: Sized;
 
@@ -255,13 +251,15 @@ macro_rules! log {
             let no_name = [];
             let mut name = &no_name[..];
             let n = buffer.name_or_hash(&string_to_bytes!($fmt_str),&hash!($fmt_str),&mut name);
-            let (data,n) = ($logger.combiner)($loglevel,&name[0..n], hash!($fmt_str),&format_arg_buffer[0..ptr]);
-            buffer.extend(&data[0..n]);
+            $logger.combiner($loglevel, hash!($fmt_str), &name[0..n], &format_arg_buffer[0..ptr]);
+            //buffer.extend(&data[0..n]);
         };
     }
 }
 
 pub mod prelude {
+    pub use core::ops::FnMut;
+
     pub use statics::{self, hash, string_to_bytes};
 
     pub use crate::{
