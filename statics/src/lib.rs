@@ -41,7 +41,7 @@ pub fn string_to_bytes(item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as LitStr).value();
     let bytes = input.as_bytes();
 
-    let len = (bytes.len() >> 1).to_le_bytes();
+    let len = bytes.len().to_le_bytes();
 
     quote! {
         [#(#len,)*#(#bytes,)*]
@@ -132,12 +132,7 @@ pub fn serialize(item: TokenStream) -> TokenStream {
         .iter()
         .map(|el| {
             quote! {
-                let (n,intermediate_data) = self.#el.into_bytes();
-                for el in 0..(n) {
-                    assert!(ptr < Self::BUFFER_SIZE);
-                    data[ptr] = intermediate_data[el];
-                    ptr += 1;
-                }
+                self.#el.into_bytes(writer);
             }
         })
         .collect();
@@ -183,16 +178,12 @@ pub fn serialize(item: TokenStream) -> TokenStream {
                 const BUFFER_SIZE: usize = {Self::__size()};
                 type Error = ();
                 /// Returns number of bytes used and buffer.
-                fn into_bytes<'a>(&'a self) -> (usize, [u8; Self::BUFFER_SIZE]) {
+                fn into_bytes<'a,F:FnMut(u8)>(&'a self,mut writer:&mut F) {
                     let mut data = [0;Self::BUFFER_SIZE];
-                    let token = #token.to_le_bytes();
-                    data[0] = token[0];
-                    data[1] = token[1];
-                    data[2] = token[2];
-                    data[3] = token[3];
+
+                    #token.to_le_bytes().iter().for_each(|el| writer(*el));
                     let mut ptr = 4;
                     #(#intermediate)*
-                    (ptr,data)
                 }
                 fn from_bytes<'a>(ptr: usize, data: &'a mut [u8]) -> Result<(usize, Self), Self::Error>
                 where

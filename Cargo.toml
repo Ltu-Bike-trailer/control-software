@@ -22,6 +22,7 @@ embedded-hal = "1.0.0"
 statics = { path = "./statics" }
 logging = { path = "./logging" }
 
+protocol = { path = "./protocol" }
 # Helpers
 
 ## Defines a double ended queue implementation of arrays instead of vectors
