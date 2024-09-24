@@ -17,19 +17,25 @@ use controller as _;
 
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC0])]
 mod app {
-    use controller::drivers::can::{CanControllSettings, CanDriver, CanMessage, CanSettings, OperationTypes, CLKPRE, OSM};
+    use controller::drivers::can::{CanControllSettings, CanDriver, CanMessage, CanSettings, OperationTypes, CLKPRE};
     use cortex_m::asm;
     use embedded_hal::digital::OutputPin;
+    use embedded_hal::spi::SpiBus;
+    use nrf52840_hal::pac::{Interrupt, SPIM0, SPIM1, SPIM2};
+    use nrf52840_hal::{spim, Clocks};
     use nrf52840_hal::{pac::SPI0, spi::Spi, spi::Frequency, spim::*};
     use nrf52840_hal::gpio::{self, Level, Port, Pin, Output, PushPull};
+    use rtic_monotonics::nrf::timer::{fugit::ExtU64, Timer0 as Mono};
+    use rtic_monotonics::nrf::{self, rtc::*};
     
-    
+  
+
     #[shared]
     struct Shared{}
 
     #[local]
     struct Local {
-        candriver: CanDriver<Spi<SPI0>, Pin<Output<PushPull>>>,
+        candriver: CanDriver<Spim<SPIM1>, Pin<Output<PushPull>>>,
     }
 
     #[init]
@@ -37,34 +43,51 @@ mod app {
         defmt::info!("init");
         let device = cx.device;
         let port0 = gpio::p0::Parts::new(device.P0);
+        let port1 = gpio::p1::Parts::new(device.P1);
 
+        let clk = Clocks::new(device.CLOCK)
+            .enable_ext_hfosc()
+            .start_lfclk();
+      
+        /* Disable shared peripheral addresses */
+        device.SPI1.enable.write(|w| w.enable().disabled());
+        device.SPIS1.enable.write(|w| w.enable().disabled());
+        device.TWIM1.enable.write(|w| w.enable().disabled());
+        device.TWIS1.enable.write(|w| w.enable().disabled());
+        device.TWI1.enable.write(|w| w.enable().disabled());
+        
         defmt::println!("Initialize the SPI instance, and CanDriver");
-        let pins = nrf52840_hal::spi::Pins{
-            sck: Some(port0.p0_21.into_push_pull_output(Level::Low).degrade()),
-            mosi: Some(port0.p0_22.into_push_pull_output(Level::Low).degrade()),
-            miso: Some(port0.p0_23.into_floating_input().degrade()),
+        let pins = nrf52840_hal::spim::Pins{
+            sck: Some(port0.p0_19.into_push_pull_output(Level::Low).degrade()),
+            mosi: Some(port0.p0_20.into_push_pull_output(Level::Low).degrade()),
+            miso: Some(port0.p0_21.into_floating_input().degrade()),
         };
         
-        //device.SPI0.enable.write(|w| w.enable());
-       
-        //TODO: - Set the device clock frequency so it matches the SPI frequency
-        let mut spi = Spi::new(device.SPI0, pins, Frequency::M1, MODE_0);
-        let cs_pin = port0.p0_24.into_push_pull_output(Level::High).degrade(); 
+        let cs_pin = port1.p1_09.into_push_pull_output(Level::Low).degrade(); 
+         
+        //let mut spi = Spi::new(device.SPI0, pins, Frequency::M1, MODE_0);
+        let mut spim = Spim::new(device.SPIM1, pins, nrf52840_hal::spim::Frequency::M8, spim::MODE_0, 0);
+         
+        let dummy_data = b"dummy data test";
+        let test_vec = *dummy_data;
+        let mut byte_msg: [u8; 3] = [0x02, 0x0F, 0x00];
+        let mut read_buf = [0; 255];
 
-        let OSM: bool = false;
-        let ABAT: bool = false; 
+        const OSM: bool = false;
+        const ABAT: bool = false; 
 
-        let canctrl_settings = CanControllSettings::new(OperationTypes::Loopback, false, CLKPRE::DIV1, ABAT, OSM);
+        let canctrl_settings = CanControllSettings::new(OperationTypes::Configuration, false, CLKPRE::DIV1, ABAT, OSM);
              
         let can_settings = CanSettings{
             canctrl: canctrl_settings,
-            can_clk: 0,
+            mcp_clk: 0,
             can_bitrate: 0, 
         };
 
-        let mut can_driver = CanDriver::init(spi, cs_pin, can_settings);
+        let mut can_driver = CanDriver::init(spim, cs_pin, can_settings);
         
-        defmt::println!("After initializing Spi<SPI0>..."); 
+        defmt::println!("After initializing Spim<SPIM1>...");
+        //can_driver.loopback_test();
 
         (
             Shared {},
@@ -73,11 +96,24 @@ mod app {
     }
 
     #[idle]
-    fn idle(_: idle::Context) -> ! {
+    fn idle(cx: idle::Context) -> ! {
         defmt::info!("idle");
+        buffer_readwrite::spawn().unwrap();
+        buffer_readwrite::spawn().unwrap();
 
         loop {
             asm::wfi(); 
         }
+    }
+
+    #[task(local = [candriver], priority = 1)]
+    async fn buffer_readwrite(cx: buffer_readwrite::Context){
+        let dummy_data = b"dummy data test";
+        let test_vec = *dummy_data;
+        let mut byte_msg: [u8; 3] = [0x02, 0x0F, 0x00];
+        let mut read_buf = [0; 255];
+
+        cx.local.candriver.transfer(&mut read_buf, &byte_msg);
+        cx.local.candriver.spi.transfer_split_uneven(&mut cx.local.candriver.cs, &test_vec, &mut read_buf);
     }
 }
