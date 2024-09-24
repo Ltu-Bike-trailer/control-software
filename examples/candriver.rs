@@ -55,15 +55,17 @@ mod app {
         device.TWIM1.enable.write(|w| w.enable().disabled());
         device.TWIS1.enable.write(|w| w.enable().disabled());
         device.TWI1.enable.write(|w| w.enable().disabled());
-        
+       
+        /* PINS: 0.17, 0.19, 0.20, 0.21, 0.22, 0.23 is for flash memory pins, need to cut it? */
+
         defmt::println!("Initialize the SPI instance, and CanDriver");
         let pins = nrf52840_hal::spim::Pins{
-            sck: Some(port0.p0_19.into_push_pull_output(Level::Low).degrade()),
-            mosi: Some(port0.p0_20.into_push_pull_output(Level::Low).degrade()),
-            miso: Some(port0.p0_21.into_floating_input().degrade()),
+            sck: Some(port0.p0_05.into_push_pull_output(Level::Low).degrade()),
+            mosi: Some(port0.p0_06.into_push_pull_output(Level::Low).degrade()),
+            miso: Some(port0.p0_07.into_floating_input().degrade()),
         };
         
-        let cs_pin = port1.p1_09.into_push_pull_output(Level::Low).degrade(); 
+        let cs_pin = port1.p1_08.into_push_pull_output(Level::High).degrade(); 
          
         //let mut spi = Spi::new(device.SPI0, pins, Frequency::M1, MODE_0);
         let mut spim = Spim::new(device.SPIM1, pins, nrf52840_hal::spim::Frequency::M8, spim::MODE_0, 0);
@@ -87,7 +89,7 @@ mod app {
         let mut can_driver = CanDriver::init(spim, cs_pin, can_settings);
         
         defmt::println!("After initializing Spim<SPIM1>...");
-        //can_driver.loopback_test();
+        can_driver.loopback_test();
 
         (
             Shared {},
@@ -98,9 +100,8 @@ mod app {
     #[idle]
     fn idle(cx: idle::Context) -> ! {
         defmt::info!("idle");
-        buffer_readwrite::spawn().unwrap();
-        buffer_readwrite::spawn().unwrap();
-
+        //buffer_readwrite::spawn().unwrap();
+        
         loop {
             asm::wfi(); 
         }
