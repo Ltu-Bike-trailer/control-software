@@ -1,7 +1,6 @@
 //! Defines a few message identifiers as constants and a few operations on them.
 //!
 //! This is what we use for determining the message type during runtime.
-use core::u16;
 
 use embedded_can::StandardId;
 use statics::Iter;
@@ -41,6 +40,7 @@ pub enum Message {
 }
 
 impl Message {
+    #[allow(clippy::wrong_self_convention)]
     const fn to_standard_id(self) -> StandardId {
         let repr = self as u16;
         // This should be caught by unit tests.
@@ -50,7 +50,7 @@ impl Message {
 }
 impl From<Message> for embedded_can::Id {
     fn from(value: Message) -> Self {
-        embedded_can::Id::Standard(value.to_standard_id())
+        Self::Standard(value.to_standard_id())
     }
 }
 

@@ -4,8 +4,8 @@
 //! [`Message identifier`](constants::Message) and a single f32.
 pub mod constants;
 
+#[allow(clippy::enum_glob_use)]
 use constants::{InvalidMessageId, Message::*};
-#[allow(clippy::wildcard_imports)]
 use embedded_can::{Frame, Id};
 use heapless::binary_heap::Max;
 
@@ -81,7 +81,7 @@ pub enum MotorSubSystem {
 }
 
 /// Denotes our different log levels.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum GeneralLogType {}
 
 #[derive(Clone, Debug)]
@@ -122,13 +122,13 @@ impl TryFrom<&CanMessage> for WriteType {
     fn try_from(value: &CanMessage) -> Result<Self, Self::Error> {
         Ok(match value.id() {
             Id::Standard(id) => match constants::Message::try_from(id)? {
-                LeftMotor | RightMotor => WriteType::Motor(MotorSubSystem::try_from(value)?),
+                LeftMotor | RightMotor => Self::Motor(MotorSubSystem::try_from(value)?),
                 SensorAlpha | SensorTheta | SensorLBed | SensorLFront => {
-                    WriteType::Sensor(SensorSubSystem::try_from(value)?)
+                    Self::Sensor(SensorSubSystem::try_from(value)?)
                 }
                 _ => return Err(ParsingError::IncorrectId),
             },
-            _ => return Err(ParsingError::IncorrectId),
+            Id::Extended(_) => return Err(ParsingError::IncorrectId),
         })
     }
 }
@@ -158,11 +158,11 @@ impl TryFrom<&CanMessage> for MotorSubSystem {
                 RightMotor => false,
                 _ => return Err(ParsingError::IncorrectId),
             },
-            _ => return Err(ParsingError::IncorrectId),
+            Id::Extended(_) => return Err(ParsingError::IncorrectId),
         };
         let data = value.data();
         let buff = [
-            match data.get(0) {
+            match data.first() {
                 Some(val) => *val,
                 None => return Err(ParsingError::InsufficientBytes),
             },
@@ -219,11 +219,11 @@ impl TryFrom<&CanMessage> for SensorSubSystem {
                 SensorLFront => 3,
                 _ => return Err(ParsingError::IncorrectId),
             },
-            _ => return Err(ParsingError::IncorrectId),
+            Id::Extended(_) => return Err(ParsingError::IncorrectId),
         };
         let data = value.data();
         let buff = [
-            match data.get(0) {
+            match data.first() {
                 Some(val) => *val,
                 None => return Err(ParsingError::InsufficientBytes),
             },
@@ -252,17 +252,17 @@ impl TryFrom<&CanMessage> for SensorSubSystem {
 
 impl Message<CanMessage> for SensorSubSystem {}
 
-impl Into<CanMessage> for FixedLogType {
-    fn into(self) -> CanMessage {
-        match self {
-            Self::BatteryStatus(BatteryStatus(val)) => {
-                CanMessage::new(BatteryDiag, &val.to_le_bytes()).expect("Invalid parser")
+impl From<FixedLogType> for CanMessage {
+    fn from(value: FixedLogType) -> Self {
+        match value {
+            FixedLogType::BatteryStatus(BatteryStatus(val)) => {
+                Self::new(BatteryDiag, &val.to_le_bytes()).expect("Invalid parser")
             }
-            Self::Velocity(VelocityInfo(MotorSubSystem::Left(val))) => {
-                CanMessage::new(MotorDiagLeft, &val.to_le_bytes()).expect("Invalid parser")
+            FixedLogType::Velocity(VelocityInfo(MotorSubSystem::Left(val))) => {
+                Self::new(MotorDiagLeft, &val.to_le_bytes()).expect("Invalid parser")
             }
-            Self::Velocity(VelocityInfo(MotorSubSystem::Right(val))) => {
-                CanMessage::new(MotorDiagRight, &val.to_le_bytes()).expect("Invalid parser")
+            FixedLogType::Velocity(VelocityInfo(MotorSubSystem::Right(val))) => {
+                Self::new(MotorDiagRight, &val.to_le_bytes()).expect("Invalid parser")
             }
         }
     }
@@ -278,11 +278,11 @@ impl TryFrom<&CanMessage> for FixedLogType {
                 BatteryDiag => 2,
                 _ => return Err(ParsingError::IncorrectId),
             },
-            _ => return Err(ParsingError::IncorrectId),
+            Id::Extended(_) => return Err(ParsingError::IncorrectId),
         };
         let data = value.data();
         let buff = [
-            match data.get(0) {
+            match data.first() {
                 Some(val) => *val,
                 None => return Err(ParsingError::InsufficientBytes),
             },
@@ -312,11 +312,11 @@ impl TryFrom<&CanMessage> for FixedLogType {
 
 impl Message<CanMessage> for FixedLogType {}
 
-impl Into<CanMessage> for MessageType {
-    fn into(self) -> CanMessage {
-        match self {
-            Self::FixedLog(f) => f.into(),
-            Self::Write(w) => w.into(),
+impl From<MessageType> for CanMessage {
+    fn from(value: MessageType) -> Self {
+        match value {
+            MessageType::FixedLog(f) => f.into(),
+            MessageType::Write(w) => w.into(),
         }
     }
 }
@@ -334,7 +334,7 @@ impl TryFrom<&CanMessage> for MessageType {
                     Self::FixedLog(FixedLogType::try_from(value)?)
                 }
             },
-            _ => return Err(ParsingError::IncorrectId),
+            Id::Extended(_) => return Err(ParsingError::IncorrectId),
         })
     }
 }
@@ -355,7 +355,7 @@ impl Frame for CanMessage {
             debug_assert!(idx < 8);
             buffer[idx] = *el;
         }
-        Some(CanMessage {
+        Some(Self {
             id: id.into(),
             dlc: data.len() as u8,
             data: buffer,
@@ -444,6 +444,7 @@ pub struct Sender<const N: usize> {
 pub struct OOM();
 
 impl<const N: usize> Sender<N> {
+    #[must_use]
     /// Creates a new sender.
     pub const fn new() -> Self {
         Self {
@@ -452,6 +453,10 @@ impl<const N: usize> Sender<N> {
     }
 
     /// Enqueues a new message in the buffer.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the underlying buffer is full.
     pub fn enqueue(&mut self, msg: MessageType) -> Result<(), OOM> {
         self.buffer.push(msg).map_err(|_| OOM())
     }
@@ -462,42 +467,29 @@ impl<const N: usize> Sender<N> {
     }
 }
 
+impl<const N: usize> Default for Sender<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PartialOrd for MessageType {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(match (self, other) {
-            (Self::Write(WriteType::Motor(_)), Self::Write(WriteType::Motor(_))) => {
-                core::cmp::Ordering::Equal
-            }
-            (Self::Write(WriteType::Sensor(_)), Self::Write(WriteType::Sensor(_))) => {
-                core::cmp::Ordering::Equal
-            }
-            (Self::FixedLog(_), Self::FixedLog(_)) => core::cmp::Ordering::Equal,
-            (Self::Write(WriteType::Motor(_)), _) => core::cmp::Ordering::Greater,
-            (Self::Write(WriteType::Sensor(_)), Self::Write(WriteType::Motor(_))) => {
-                core::cmp::Ordering::Less
-            }
-            (Self::Write(WriteType::Sensor(_)), _) => core::cmp::Ordering::Greater,
-            (Self::FixedLog(_), _) => core::cmp::Ordering::Less,
-        })
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for MessageType {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         match (self, other) {
-            (Self::Write(WriteType::Motor(_)), Self::Write(WriteType::Motor(_))) => {
-                core::cmp::Ordering::Equal
+            (Self::Write(WriteType::Motor(_)), Self::Write(WriteType::Motor(_)))
+            | (Self::Write(WriteType::Sensor(_)), Self::Write(WriteType::Sensor(_)))
+            | (Self::FixedLog(_), Self::FixedLog(_)) => core::cmp::Ordering::Equal,
+            (Self::Write(WriteType::Sensor(_)), Self::Write(WriteType::Motor(_)))
+            | (Self::FixedLog(_), _) => core::cmp::Ordering::Less,
+            (Self::Write(WriteType::Sensor(_)) | Self::Write(WriteType::Motor(_)), _) => {
+                core::cmp::Ordering::Greater
             }
-            (Self::Write(WriteType::Sensor(_)), Self::Write(WriteType::Sensor(_))) => {
-                core::cmp::Ordering::Equal
-            }
-            (Self::FixedLog(_), Self::FixedLog(_)) => core::cmp::Ordering::Equal,
-            (Self::Write(WriteType::Motor(_)), _) => core::cmp::Ordering::Greater,
-            (Self::Write(WriteType::Sensor(_)), Self::Write(WriteType::Motor(_))) => {
-                core::cmp::Ordering::Less
-            }
-            (Self::Write(WriteType::Sensor(_)), _) => core::cmp::Ordering::Greater,
-            (Self::FixedLog(_), _) => core::cmp::Ordering::Less,
         }
     }
 }

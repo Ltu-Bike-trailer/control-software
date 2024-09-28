@@ -27,6 +27,14 @@
     rust_2018_idioms,
     keyword_idents_2024
 )]
+#![allow(
+    clippy::option_if_let_else,
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::match_bool,
+    // I see the benefits of this but it is not worth it for our usecase.
+    clippy::from_over_into
+)]
 #![cfg_attr(not(feature = "std"), no_std)]
 pub mod constants;
 pub mod gain_scheduled;

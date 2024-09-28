@@ -49,7 +49,7 @@ impl Message {
 }
 impl From<Message> for embedded_can::Id {
     fn from(value: Message) -> Self {
-        embedded_can::Id::Standard(value.to_standard_id())
+        Self::Standard(value.to_standard_id())
     }
 }
 

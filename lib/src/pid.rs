@@ -563,9 +563,9 @@ macro_rules! new_pid {
 pub mod prelude {
 
     impl Channel<()> for f32 {
-        type Output = f32;
+        type Output = Self;
 
-        fn set(&mut self, value: f32) -> Result<(), ()> {
+        fn set(&mut self, value: Self) -> Result<(), ()> {
             *self = value;
             Ok(())
         }
@@ -587,10 +587,10 @@ mod sealed {
         fn convert(self) -> Result<Dest, Self::Error>;
     }
 
-    impl Convert<i32> for i32 {
+    impl Convert<Self> for i32 {
         type Error = Infallible;
 
-        fn convert(self) -> Result<i32, Self::Error> {
+        fn convert(self) -> Result<Self, Self::Error> {
             Ok(self)
         }
     }
@@ -656,7 +656,7 @@ mod sealed {
         }
     }
 }
-use sealed::*;
+use sealed::{CmpExt, Convert};
 
 impl DoubleSize for i32 {
     type Error = ();
@@ -686,7 +686,7 @@ impl DoubleSize for f32 {
     where
         Self: Sized,
     {
-        Ok(value as f32)
+        Ok(value as Self)
     }
 }
 
