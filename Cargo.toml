@@ -20,9 +20,8 @@ rtic-monotonics = { version = "1.0.0", features = [
 rtic-sync = "1.3.0"
 embedded-hal = "1.0.0"
 statics = { path = "./statics" }
-logging = { path = "./logging" }
 
-protocol = { path = "./protocol" }
+protocol = { path = "./new_protocol" }
 # Helpers
 
 ## Defines a double ended queue implementation of arrays instead of vectors
@@ -62,15 +61,6 @@ overflow-checks = false  # <-
 
 [features]
 
-can = ["logging/can"]
-ble = ["logging/ble"]
-
-
-info = ["logging/info"]
-trace = ["logging/trace"]
-debug = ["logging/debug"]
-warn = ["logging/warn"]
-error = ["logging/error"]
 
 # uncomment this to switch from the crates.io version of defmt to its git version
 # check app-template's README for instructions
