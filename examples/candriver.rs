@@ -17,17 +17,17 @@ use controller as _;
 
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC0])]
 mod app {
-    use controller::drivers::can::{CanControllSettings, CanDriver, CanMessage, CanSettings, OperationTypes, CLKPRE};
+    use controller::drivers::can::{CanControllSettings, CanDriver, CanMessage, CanSettings, OperationTypes, CLKPRE, McpClock, CanBitrate};
+    use controller::boards::*;
     use cortex_m::asm;
     use embedded_hal::digital::OutputPin;
     use embedded_hal::spi::SpiBus;
-    use nrf52840_hal::pac::{Interrupt, SPIM0, SPIM1, SPIM2};
+    use nrf52840_hal::pac::{Interrupt, SPI1, SPIM0, SPIM1, SPIM2};
     use nrf52840_hal::{spim, Clocks};
     use nrf52840_hal::{pac::SPI0, spi::Spi, spi::Frequency, spim::*};
     use nrf52840_hal::gpio::{self, Level, Port, Pin, Output, PushPull};
     use rtic_monotonics::nrf::timer::{fugit::ExtU64, Timer0 as Mono};
     use rtic_monotonics::nrf::{self, rtc::*};
-    
   
 
     #[shared]
@@ -35,7 +35,7 @@ mod app {
 
     #[local]
     struct Local {
-        candriver: CanDriver<Spim<SPIM1>, Pin<Output<PushPull>>>,
+        candriver: CanDriver<Spi<SPI1>, Pin<Output<PushPull>>>,
     }
 
     #[init]
@@ -50,7 +50,8 @@ mod app {
             .start_lfclk();
       
         /* Disable shared peripheral addresses */
-        device.SPI1.enable.write(|w| w.enable().disabled());
+        //device.SPI1.enable.write(|w| w.enable().disabled());
+        device.SPIM1.enable.write(|w| w.enable().disabled());        
         device.SPIS1.enable.write(|w| w.enable().disabled());
         device.TWIM1.enable.write(|w| w.enable().disabled());
         device.TWIS1.enable.write(|w| w.enable().disabled());
@@ -58,22 +59,25 @@ mod app {
        
         /* PINS: 0.17, 0.19, 0.20, 0.21, 0.22, 0.23 is for flash memory pins, need to cut it? */
 
+        //let pin_mapping = PinMapping::new(port0, port1);
+        //let (pin_map, spi) =pin_mapping.can(device.SPIM1);
+
         defmt::println!("Initialize the SPI instance, and CanDriver");
-        let pins = nrf52840_hal::spim::Pins{
+        let pins = nrf52840_hal::spi::Pins{
             sck: Some(port0.p0_05.into_push_pull_output(Level::Low).degrade()),
             mosi: Some(port0.p0_06.into_push_pull_output(Level::Low).degrade()),
             miso: Some(port0.p0_07.into_floating_input().degrade()),
         };
         
         let cs_pin = port1.p1_08.into_push_pull_output(Level::High).degrade(); 
-         
-        //let mut spi = Spi::new(device.SPI0, pins, Frequency::M1, MODE_0);
-        let mut spim = Spim::new(device.SPIM1, pins, nrf52840_hal::spim::Frequency::M8, spim::MODE_0, 0);
+        let can_interrupt = port1.p1_06.into_floating_input().degrade();
+        
+
+        let mut spi = Spi::new(device.SPI1, pins, Frequency::M1, MODE_0);
+        //let mut spim = Spim::new(device.SPIM1, pins, nrf52840_hal::spim::Frequency::M8, spim::MODE_0, 0);
          
         let dummy_data = b"dummy data test";
         let test_vec = *dummy_data;
-        let mut byte_msg: [u8; 3] = [0x02, 0x0F, 0x00];
-        let mut read_buf = [0; 255];
 
         const OSM: bool = false;
         const ABAT: bool = false; 
@@ -82,13 +86,14 @@ mod app {
              
         let can_settings = CanSettings{
             canctrl: canctrl_settings,
-            mcp_clk: 0,
-            can_bitrate: 0, 
+            mcp_clk: McpClock::MCP8,
+            can_bitrate: CanBitrate::CAN125, 
         };
 
-        let mut can_driver = CanDriver::init(spim, cs_pin, can_settings);
         
-        defmt::println!("After initializing Spim<SPIM1>...");
+        let mut can_driver = CanDriver::init(spi, cs_pin, can_settings);
+        
+        defmt::println!("After initializing Spi<SPI1>...");
         can_driver.loopback_test();
 
         (
@@ -112,9 +117,9 @@ mod app {
         let dummy_data = b"dummy data test";
         let test_vec = *dummy_data;
         let mut byte_msg: [u8; 3] = [0x02, 0x0F, 0x00];
-        let mut read_buf = [0; 255];
+        let mut read_buf = [0u8; 255];
 
-        cx.local.candriver.transfer(&mut read_buf, &byte_msg);
-        cx.local.candriver.spi.transfer_split_uneven(&mut cx.local.candriver.cs, &test_vec, &mut read_buf);
+        //cx.local.candriver.transfer(&mut read_buf, &byte_msg);
+        //cx.local.candriver.spi.transfer_split_uneven(&mut cx.local.candriver.cs, &test_vec, &mut read_buf);
     }
 }
