@@ -22,7 +22,7 @@ pub trait PidParams<const FIXED_POINT: u32>: Copy {
 }
 
 #[derive(Copy, Clone)]
-/// An example of valid PID parameters valid up until the max_value.
+/// An example of valid PID parameters valid up until the `max_value`.
 pub struct GainParams<const FIXED_POINT: u32> {
     /// The proportional gain.
     pub kp: i32,
@@ -39,7 +39,7 @@ pub struct GainParams<const FIXED_POINT: u32> {
 /// Provides a simple gain scheduled controller.
 ///
 /// This controller allows changing parameters based on some signal set via
-/// [`GainScheduler::set_bucket].
+/// [`GainScheduler::set_bucket`].
 pub struct GainScheduler<
     Error: Debug,
     Interface: Channel<Error, Output = f32>,
@@ -109,30 +109,25 @@ impl<
 {
     /// Creates a new controller that sets the output on the
     /// [`Interface`](`Channel`) using a PID control strategy.
-    pub fn new(
-        channel: Interface,
-        params: [ParamsStore; REGIONS],
-    ) -> GainScheduler<
-        Error,
-        Interface,
-        ParamsStore,
-        REGIONS,
-        THRESHOLD_MAX,
-        THRESHOLD_MIN,
-        TIMESCALE,
-        FIXED_POINT,
-    > {
+    ///
+    ///
+    /// # Panics
+    ///
+    /// This function panics if the gain regions are not provided in ascending
+    /// order.
+    pub fn new(channel: Interface, params: [ParamsStore; REGIONS]) -> Self {
         let mut index_map = [(0., 0); REGIONS];
         let mut prev_thresh = f32::MIN;
         for (idx, el) in params.iter().enumerate() {
-            if el.get_min() <= prev_thresh {
-                panic!()
-            }
+            debug_assert!(
+                el.get_min() <= prev_thresh,
+                "Gain regions must be provided in ascending order"
+            );
             prev_thresh = el.get_min();
             index_map[idx] = (prev_thresh, idx);
         }
 
-        GainScheduler {
+        Self {
             index_map,
             parameters: params,
             prev_time: 0,
@@ -158,7 +153,7 @@ impl<
         self.bucketer = bucketer;
     }
 
-    /// Registers a new timestampted measurement.
+    /// Registers a new timestamped measurement.
     pub fn register_measurement(&mut self, measurement: (f32, u64)) {
         self.prev_time = self.measurement.1;
         self.measurement = measurement;
@@ -186,17 +181,26 @@ impl<
     /// Computes the control signal using a PID control strategy.
     ///
     /// if successful it returns the expected value and the read value.
-    pub fn actuate(&mut self) -> Result<ControlInfo<f32>, ()> {
-        let output = self.compute_output()?;
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the [`Channel`] fails.
+    pub fn actuate(&mut self) -> Result<ControlInfo<f32>, Error> {
+        let output = self.compute_output();
 
-        self.interface.set(output.actuation).unwrap();
+        self.interface.set(output.actuation)?;
         self.previous_actuation = output.actuation;
 
         Ok(output)
     }
 
     /// Computes the controller output at the latest timestamped measurement.
-    pub fn compute_output(&mut self) -> Result<ControlInfo<f32>, ()> {
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if any of the underlying numeric
+    /// conversion fail.
+    pub fn compute_output(&mut self) -> ControlInfo<f32> {
         let target: f32 = self.reference;
 
         let gain = self.get_gain();
@@ -220,7 +224,7 @@ impl<
         let p = error * kp;
 
         // Integral is approximated as a sum of discrete signals.
-        let avg = self.previous_error as f64 + error as f64;
+        let avg = f64::from(self.previous_error) + f64::from(error);
         self.integral += ((avg / 2.) as f32) * ts / time_scale;
 
         self.integral = self.integral.max(threshold_min).min(threshold_max);
@@ -236,7 +240,7 @@ impl<
             .max(threshold_min)
             .min(threshold_max);
 
-        Ok(ControlInfo {
+        ControlInfo {
             reference: target,
             measured: actual,
             actuation: output,
@@ -244,6 +248,6 @@ impl<
             i,
             d,
             pre_threshold: (p + i + d) / fixed_point,
-        })
+        }
     }
 }

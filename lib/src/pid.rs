@@ -1,5 +1,7 @@
 //! Defines a PID controller.
 
+#![allow(clippy::module_name_repetitions)]
+
 use core::{
     convert::Infallible,
     fmt::Debug,
@@ -14,6 +16,11 @@ pub trait Channel<Error: Debug> {
     /// The value type that the channel accepts.
     type Output: Sized;
     /// Sets the output value for the type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if there is some underlying issue.
+    /// See specific implementations for details.
     fn set(&mut self, value: Self::Output) -> Result<(), Error>;
 }
 
@@ -29,6 +36,8 @@ pub trait DoubleSize {
     fn double_size(self) -> Self::Ret;
 
     /// Halves the size of the value.
+    ///
+    /// # Errors
     ///
     /// Returns error if the value does not fit.
     fn half_size(value: Self::Ret) -> Result<Self, Self::Error>
@@ -195,6 +204,11 @@ where
     /// Computes the control signal using a PID control strategy.
     ///
     /// if successful it returns the expected value and the read value.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the underlying [`Channel`] fails or
+    /// any numeric conversions fail.
     pub fn actuate_rate_limited(
         &mut self,
         rate_limit: Output,
@@ -225,6 +239,11 @@ where
     /// Computes the control signal using a PID control strategy.
     ///
     /// if successful it returns the expected value and the read value.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the underlying [`Channel`] fails or
+    /// any numeric conversions fail.
     pub fn actuate(
         &mut self,
     ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>>
@@ -242,6 +261,12 @@ where
         Ok(output)
     }
 
+    /// Computes the latest control output.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the underlying [`Channel`] fails or
+    /// any numeric conversions fail.
     fn compute_output(
         &mut self,
     ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>> {
@@ -376,6 +401,11 @@ where
     /// Computes the control signal using a PID control strategy.
     ///
     /// if successful it returns the expected value and the read value.
+    ///
+    /// # Errors
+    ///
+    /// This errors if any of the numeric conversions fail or the [`Channel`]
+    /// fails.
     pub fn actuate_rate_limited(
         &mut self,
         rate_limit: Output,
@@ -407,6 +437,11 @@ where
     /// Computes the control signal using a PID control strategy.
     ///
     /// if successful it returns the expected value and the read value.
+    ///
+    /// # Errors
+    ///
+    /// This errors if any of the numeric conversions fail or the [`Channel`]
+    /// fails.
     pub fn actuate(
         &mut self,
         ts: u64,
@@ -425,6 +460,12 @@ where
         Ok(output)
     }
 
+    /// Computes the desired output for the latest set of measurements and
+    /// reference signals.
+    ///
+    /// # Errors
+    ///
+    /// If any numeric conversions fail.
     fn compute_output(
         &mut self,
         ts: u64,
@@ -523,6 +564,7 @@ where
 ///   // Accumulated sum + average from previous time step to the current time step.
 ///   assert!(actuation.actuation == expected);
 /// ```
+#[allow(clippy::module_name_repetitions)]
 macro_rules! new_pid {
     (
         buffer_size:

@@ -1,13 +1,12 @@
 //! Defines a simple set of constant identifiers for messages.
 //!
 //! This is what we use to determine the underlying message type.
-use core::u16;
 
 use embedded_can::StandardId;
 use statics::Iter;
 
 /// Defines the message enumerations.
-// Enumerates all fo the message types.
+/// Enumerates all of the message types.
 #[repr(u16)]
 #[derive(Clone, Iter, Debug)]
 pub enum Message {
@@ -20,9 +19,9 @@ pub enum Message {
     SensorTheta = 10,
     /// Represents a write of alpha sensor value.
     SensorAlpha = 11,
-    /// Represents a write of front loadcell value.
+    /// Represents a write of front load cell value.
     SensorLFront = 12,
-    /// Represents a write of bed loadcell value.
+    /// Represents a write of bed load cell value.
     SensorLBed = 13,
 
     /// Represents a status message from the left motor.
@@ -33,14 +32,14 @@ pub enum Message {
     ///
     /// The value paired with this is a f32 representing the velocity.
     MotorDiagRight = 40,
-    /// Represents a status message from the batery.
+    /// Represents a status message from the battery.
     ///
     /// The value paired with this is a f32 representing the battery voltage.
     BatteryDiag = 50,
 }
 
 impl Message {
-    const fn to_standard_id(self) -> StandardId {
+    const fn __to_standard_id(self) -> StandardId {
         let repr = self as u16;
         // This should be caught by unit tests.
         debug_assert!(repr < 1 << 11);
@@ -49,7 +48,7 @@ impl Message {
 }
 impl From<Message> for embedded_can::Id {
     fn from(value: Message) -> Self {
-        Self::Standard(value.to_standard_id())
+        Self::Standard(value.__to_standard_id())
     }
 }
 

@@ -3,11 +3,11 @@
 //! This is a dead simple protocol a typical message is defined by a
 //! [`Message identifier`](constants::Message) and a single f32.
 pub mod constants;
+pub mod sender;
 
 #[allow(clippy::enum_glob_use)]
 use constants::{InvalidMessageId, Message::*};
 use embedded_can::{Frame, Id};
-use heapless::binary_heap::Max;
 
 /// Denotes all of the supported message types.
 #[derive(Clone, Debug)]
@@ -46,7 +46,7 @@ pub enum FixedLogType {
 /// The velocity of the given motor.
 #[derive(Clone, PartialEq, Debug)]
 pub struct VelocityInfo(
-    /// The motor syb system the message is refering to.
+    /// The motor sub system the message relates to.
     pub MotorSubSystem,
 );
 
@@ -85,7 +85,7 @@ pub enum MotorSubSystem {
 pub enum GeneralLogType {}
 
 #[derive(Clone, Debug)]
-/// The message could not be propperly parsed.
+/// The message could not be properly parsed.
 pub enum ParsingError {
     /// The message id was not valid.
     IncorrectId,
@@ -387,92 +387,6 @@ impl Frame for CanMessage {
     }
 }
 
-/// A simple sender wrapper.
-///
-/// This is abstraction allows the can task to dequeue [`CanMessage`]s from the
-/// buffer. And allows any sender to enqueue [`MessageType`]s in the buffer,
-/// thus making the abstraction quite simple to use.
-///
-/// ## Example
-///
-/// ```
-/// use embedded_can::Frame;
-/// use lib::protocol::{
-///     BatteryStatus,
-///     FixedLogType,
-///     MessageType,
-///     MotorSubSystem,
-///     Sender,
-///     SensorSubSystem,
-///     VelocityInfo,
-///     WriteType,CanMessage
-/// };
-///
-/// let to_test = [
-///     MessageType::FixedLog(FixedLogType::BatteryStatus(BatteryStatus(129.))),
-///     MessageType::FixedLog(FixedLogType::Velocity(VelocityInfo(MotorSubSystem::Left(
-///         129.,
-///     )))),
-///     MessageType::FixedLog(FixedLogType::Velocity(VelocityInfo(MotorSubSystem::Right(
-///         129.,
-///     )))),
-///     MessageType::Write(WriteType::Motor(MotorSubSystem::Left(10.))),
-///     MessageType::Write(WriteType::Motor(MotorSubSystem::Right(10.))),
-///     MessageType::Write(WriteType::Sensor(SensorSubSystem::AlphaSensor(10.))),
-///     MessageType::Write(WriteType::Sensor(SensorSubSystem::ThetaSensor(10.))),
-///     MessageType::Write(WriteType::Sensor(SensorSubSystem::LoadCellBed(10.))),
-///     MessageType::Write(WriteType::Sensor(SensorSubSystem::LoadCellFront(10.))),
-/// ];
-/// let mut buffer = Sender::<10>::new();
-/// to_test
-///     .iter()
-///     .for_each(|el| buffer.enqueue(el.clone()).unwrap());
-///
-/// while let Some(msg) = buffer.dequeue() {
-///     println!("Expected {:?}", msg.data());
-///     let serialzed: CanMessage = msg;
-///     let de: MessageType = MessageType::try_from(&serialzed).unwrap();
-///     println!("Expected {:?}", de);
-/// }
-/// ```
-pub struct Sender<const N: usize> {
-    buffer: heapless::BinaryHeap<MessageType, Max, N>,
-}
-
-#[derive(Clone, Copy, Debug)]
-/// The buffer is full. This should not happen.
-pub struct OOM();
-
-impl<const N: usize> Sender<N> {
-    #[must_use]
-    /// Creates a new sender.
-    pub const fn new() -> Self {
-        Self {
-            buffer: heapless::BinaryHeap::new(),
-        }
-    }
-
-    /// Enqueues a new message in the buffer.
-    ///
-    /// # Errors
-    ///
-    /// This function returns an error if the underlying buffer is full.
-    pub fn enqueue(&mut self, msg: MessageType) -> Result<(), OOM> {
-        self.buffer.push(msg).map_err(|_| OOM())
-    }
-
-    /// Dequeues  can frame from the buffer ready to send to the driver.
-    pub fn dequeue(&mut self) -> Option<CanMessage> {
-        Some(self.buffer.pop()?.into())
-    }
-}
-
-impl<const N: usize> Default for Sender<N> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl PartialOrd for MessageType {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
@@ -487,7 +401,7 @@ impl Ord for MessageType {
             | (Self::FixedLog(_), Self::FixedLog(_)) => core::cmp::Ordering::Equal,
             (Self::Write(WriteType::Sensor(_)), Self::Write(WriteType::Motor(_)))
             | (Self::FixedLog(_), _) => core::cmp::Ordering::Less,
-            (Self::Write(WriteType::Sensor(_)) | Self::Write(WriteType::Motor(_)), _) => {
+            (Self::Write(WriteType::Sensor(_) | WriteType::Motor(_)), _) => {
                 core::cmp::Ordering::Greater
             }
         }
@@ -511,11 +425,11 @@ mod test {
     use embedded_can::Frame;
 
     use super::{
+        sender::Sender,
         BatteryStatus,
         FixedLogType,
         MessageType,
         MotorSubSystem,
-        Sender,
         SensorSubSystem,
         VelocityInfo,
         WriteType,
