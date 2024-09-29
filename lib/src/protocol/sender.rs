@@ -39,8 +39,8 @@ use super::{BatteryStatus, CanMessage, MessageType, MotorSubSystem, VelocityInfo
 /// let mut n = 0;
 /// while let Some(msg) = buffer.dequeue() {
 ///     println!("Expected {:?}", msg.data());
-///     let serialzed: CanMessage = msg;
-///     let de: MessageType = MessageType::try_from(&serialzed).unwrap();
+///     let serialized: CanMessage = msg;
+///     let de: MessageType = MessageType::try_from(&serialized).unwrap();
 ///     println!("Expected {:?}", de);
 ///     n+=1;
 /// }
@@ -84,8 +84,8 @@ use super::{BatteryStatus, CanMessage, MessageType, MotorSubSystem, VelocityInfo
 ///
 /// while let Some(msg) = buffer.dequeue() {
 ///     println!("Expected {:?}", msg.data());
-///     let serialzed: CanMessage = msg;
-///     let de: MessageType = MessageType::try_from(&serialzed).unwrap();
+///     let serialized: CanMessage = msg;
+///     let de: MessageType = MessageType::try_from(&serialized).unwrap();
 ///     println!("Expected {:?}", de);
 /// }
 /// ```

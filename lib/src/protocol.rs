@@ -455,9 +455,9 @@ mod test {
         ];
 
         for msg in to_test {
-            let serialzed: CanMessage = msg.clone().into();
-            println!("ID : {:?}", serialzed.id);
-            let de: MessageType = MessageType::try_from(&serialzed).unwrap();
+            let serialized: CanMessage = msg.clone().into();
+            println!("ID : {:?}", serialized.id);
+            let de: MessageType = MessageType::try_from(&serialized).unwrap();
             println!("Expected {:?} got {:?}", msg, de);
             assert!(msg == de);
         }
@@ -486,8 +486,8 @@ mod test {
 
         while let Some(msg) = buffer.dequeue() {
             println!("Expected {:?}", msg.data());
-            let serialzed: CanMessage = msg;
-            let de: MessageType = MessageType::try_from(&serialzed).unwrap();
+            let serialized: CanMessage = msg;
+            let de: MessageType = MessageType::try_from(&serialized).unwrap();
             println!("Expected {:?}", de);
         }
     }

@@ -33,7 +33,7 @@ pub enum Message {
     ///
     /// The value paired with this is a f32 representing the velocity.
     MotorDiagRight = 40,
-    /// Represents a status message from the batery.
+    /// Represents a status message from the battery.
     ///
     /// The value paired with this is a f32 representing the battery voltage.
     BatteryDiag = 50,
