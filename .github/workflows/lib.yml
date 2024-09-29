@@ -101,7 +101,7 @@ jobs:
           cargo +nightly build --release
           cargo +nightly build --examples --release
 
-  build:
+  test:
     name: test
     runs-on: ubuntu-latest
     steps:
