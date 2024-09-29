@@ -1,14 +1,7 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    bracketed,
-    parse::Parse,
-    parse_macro_input,
-    token::Struct,
-    DeriveInput,
-    Ident,
-    LitStr,
-    Token,
+    bracketed, parse::Parse, parse_macro_input,  Data, DeriveInput, Ident, LitStr, Token
 };
 
 fn _hash(data: &str) -> u32 {
@@ -16,7 +9,7 @@ fn _hash(data: &str) -> u32 {
     data.as_bytes()
         .iter()
         .map(|num| {
-            prev_sum = prev_sum ^ *num as u32;
+            prev_sum ^= *num as u32;
             prev_sum
         })
         .sum::<u32>()
@@ -73,12 +66,64 @@ pub fn numel(item: TokenStream) -> TokenStream {
     .into()
 }
 
-static mut INDEX_COUNTER: u16 = u16::MAX;
+
+
+
+#[proc_macro_derive(Iter)]
+pub fn iter(item: TokenStream) -> TokenStream {
+    let item = parse_macro_input!(item as DeriveInput);
+    
+
+    let variants = match item.data {
+        Data::Enum(data) => data.variants,
+        Data::Struct(_) | Data::Union(_) => panic!("input must be an enum"),
+    };
+    let variants:Vec<Ident> = variants.iter().map(|el| el.ident.clone()).collect();
+
+    let name = item.ident.clone();
+    assert!(item.generics.params.is_empty(), "Cannot be trivially implemented on enums with generics");
+    let n = variants.len();
+
+        let new_ident = Ident::new(format!("Iterator{}",name).as_str(), name.span());
+
+    // #item
+    let ret = quote! {
+        #[doc(hidden)]
+        struct #new_ident {
+            i:usize
+        }
+        impl #new_ident {
+            const FIELDS:[#name;#n] = [#(#name::#variants,)*];
+        }
+        impl Iterator for #new_ident {
+            type Item = #name;
+            fn next(&mut self) -> Option<Self::Item> {
+                self.i += 1;
+                if self.i > #n {
+                    return None;
+                }
+                return Some(Self::FIELDS[self.i - 1].clone())
+            }
+        }
+        impl #name {
+            const fn iter() -> #new_ident {
+                #new_ident {
+                    i: 0
+                }
+            }
+        }
+    };
+    ret.into()
+}
+
+
+
+
 
 #[proc_macro_derive(Serializer)]
 pub fn serialize(item: TokenStream) -> TokenStream {
     let item = parse_macro_input!(item as DeriveInput);
-    let mut name = item.ident.clone();
+    let name = item.ident.clone();
     let mut field_names: Vec<Ident> = Vec::new();
     let mut field_types = Vec::new();
 
@@ -86,20 +131,17 @@ pub fn serialize(item: TokenStream) -> TokenStream {
     let mut generic_names: Vec<Ident> = item
         .generics
         .lifetimes()
-        .into_iter()
         .map(|el| el.lifetime.ident.clone())
         .collect();
 
     generic_names.extend(
         item.generics
             .type_params()
-            .into_iter()
             .map(|el| el.ident.clone()),
     );
     generic_names.extend(
         item.generics
             .const_params()
-            .into_iter()
             .map(|el| el.ident.clone()),
     );
 
@@ -127,7 +169,7 @@ pub fn serialize(item: TokenStream) -> TokenStream {
         }
     }
 
-    let token = _hash(name.to_string().as_str());;
+    let token = _hash(name.to_string().as_str());
     let intermediate: Vec<proc_macro2::TokenStream> = field_names
         .iter()
         .map(|el| {
