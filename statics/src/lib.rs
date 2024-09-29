@@ -1,8 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{
-    bracketed, parse::Parse, parse_macro_input,  Data, DeriveInput, Ident, LitStr, Token
-};
+use syn::{bracketed, parse::Parse, parse_macro_input, Data, DeriveInput, Ident, LitStr, Token};
 
 fn _hash(data: &str) -> u32 {
     let mut prev_sum: u32 = 0;
@@ -66,25 +64,24 @@ pub fn numel(item: TokenStream) -> TokenStream {
     .into()
 }
 
-
-
-
 #[proc_macro_derive(Iter)]
 pub fn iter(item: TokenStream) -> TokenStream {
     let item = parse_macro_input!(item as DeriveInput);
-    
 
     let variants = match item.data {
         Data::Enum(data) => data.variants,
         Data::Struct(_) | Data::Union(_) => panic!("input must be an enum"),
     };
-    let variants:Vec<Ident> = variants.iter().map(|el| el.ident.clone()).collect();
+    let variants: Vec<Ident> = variants.iter().map(|el| el.ident.clone()).collect();
 
     let name = item.ident.clone();
-    assert!(item.generics.params.is_empty(), "Cannot be trivially implemented on enums with generics");
+    assert!(
+        item.generics.params.is_empty(),
+        "Cannot be trivially implemented on enums with generics"
+    );
     let n = variants.len();
 
-        let new_ident = Ident::new(format!("Iterator{}",name).as_str(), name.span());
+    let new_ident = Ident::new(format!("Iterator{}", name).as_str(), name.span());
 
     // #item
     let ret = quote! {
@@ -116,10 +113,6 @@ pub fn iter(item: TokenStream) -> TokenStream {
     ret.into()
 }
 
-
-
-
-
 #[proc_macro_derive(Serializer)]
 pub fn serialize(item: TokenStream) -> TokenStream {
     let item = parse_macro_input!(item as DeriveInput);
@@ -134,16 +127,8 @@ pub fn serialize(item: TokenStream) -> TokenStream {
         .map(|el| el.lifetime.ident.clone())
         .collect();
 
-    generic_names.extend(
-        item.generics
-            .type_params()
-            .map(|el| el.ident.clone()),
-    );
-    generic_names.extend(
-        item.generics
-            .const_params()
-            .map(|el| el.ident.clone()),
-    );
+    generic_names.extend(item.generics.type_params().map(|el| el.ident.clone()));
+    generic_names.extend(item.generics.const_params().map(|el| el.ident.clone()));
 
     match &item.data {
         syn::Data::Struct(s) => {
@@ -155,13 +140,7 @@ pub fn serialize(item: TokenStream) -> TokenStream {
                     .filter(|el| el.is_some())
                     .map(|el| unsafe { el.clone().unwrap_unchecked() }),
             );
-            field_types.extend(
-                s.fields
-                    .clone()
-                    .iter()
-                    .map(|el| el.ty.clone())
-            );
-            
+            field_types.extend(s.fields.clone().iter().map(|el| el.ty.clone()));
         }
         t => {
             println!("FOUND TYPE {t:?}");
@@ -180,8 +159,9 @@ pub fn serialize(item: TokenStream) -> TokenStream {
         .collect();
 
     let intermediate_decode: Vec<proc_macro2::TokenStream> = field_names
-        .iter().zip(field_types.iter())
-        .map(|(el,ty)| {
+        .iter()
+        .zip(field_types.iter())
+        .map(|(el, ty)| {
             quote! {
                 let (n,intermediate_data) =match  #ty::from_bytes(ptr,data){
                     Ok(inner) => inner,
@@ -194,17 +174,15 @@ pub fn serialize(item: TokenStream) -> TokenStream {
         .collect();
 
     let impl_line = match generic_names.len() {
-        0 => quote!{#name},
-        _ => quote!{#name <#(#generic_names,)*>},
+        0 => quote! {#name},
+        _ => quote! {#name <#(#generic_names,)*>},
     };
 
     // #item
     quote! {
-        
         impl #generics #impl_line {
             const fn __size() -> usize {
                 let mut size = core::mem::size_of::<#name>() + 4;
-                
                 const fn size_of<T: Serializable>() -> usize {
                     T::BUFFER_SIZE
                 }
@@ -212,9 +190,7 @@ pub fn serialize(item: TokenStream) -> TokenStream {
                     size += size_of::<#field_types>();
                 )*
                 size
-    
             }
-
         }
         impl #generics Serializable for #impl_line {
                 const BUFFER_SIZE: usize = {Self::__size()};

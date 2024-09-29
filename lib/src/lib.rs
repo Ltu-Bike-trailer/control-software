@@ -11,7 +11,7 @@
 //! ## [`Gain scheduled`](gain_scheduled)
 //!
 //! Defines a PID controller that follows a parameter scheduled defined at
-//! compiletime.
+//! compile time.
 //!
 //! ## [`Wrapper`](wrapper)
 //!
