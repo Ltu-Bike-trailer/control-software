@@ -7,7 +7,6 @@
 #![deny(warnings)]
 
 use controller as _; // global logger + panicking-behavior + memory layout
-extern crate logging;
 
 #[rtic::app(
     // TODO: Replace `some_hal::pac` with the path to the PAC
@@ -19,13 +18,10 @@ extern crate logging;
 mod app {
     use core::arch::asm;
 
-    use controller::protocol::{self, ProtocolV1};
-
     // Shared resources go here
     #[shared]
     struct Shared {
         // TODO: Add resources
-        protocol: ProtocolV1,
     }
 
     // Local resources go here
@@ -37,20 +33,15 @@ mod app {
     #[init]
     fn init(_cx: init::Context) -> (Shared, Local) {
         defmt::info!("init");
-        use logging;
 
-        logging::BuffLogger::init();
         // TODO setup monotonic if used
         // let sysclk = { /* clock setup + returning sysclk as an u32 */ };
         // let token = rtic_monotonics::create_systick_token!();
         // rtic_monotonics::systick::Systick::new(cx.core.SYST, sysclk, token);
-        task1::spawn().ok();
-        let protocol = ProtocolV1::new();
 
         (
             Shared {
                 // Initialization of shared resources go here
-                protocol,
             },
             Local {
                 // Initialization of local resources go here
@@ -69,13 +60,8 @@ mod app {
     }
 
     // TODO: Add tasks
-    #[task(priority = 1,shared=[protocol])]
-    async fn task1(cx: task1::Context) {
-        cx.shared.protocol.lock(|p| {
-            while let Some(msg) = p.next() {
-                todo!("Send the message somewhere");
-            }
-        });
+    #[task(priority = 1,shared=[])]
+    async fn task1(_cx: task1::Context) {
         defmt::info!("Hello from task1!");
         for i in 0..20 {
             unsafe {
