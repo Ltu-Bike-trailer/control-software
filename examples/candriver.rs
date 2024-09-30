@@ -2,7 +2,7 @@
 #![no_main]
 #![allow(unused)]
 
-use controller::drivers::can::{CanDriver, CanSettings, CanMessage};
+use controller::drivers::{can::{CanDriver, CanSettings}, message::CanMessage};
 use nrf52840_hal as _;
 use nrf52840_hal::gpio::{Level, Port};
 use cortex_m::asm as _;
@@ -14,10 +14,9 @@ use rtic::app;
 use controller as _;
 
 
-
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC0])]
 mod app {
-    use controller::drivers::can::{CanControllSettings, CanDriver, CanMessage, CanSettings, OperationTypes, CLKPRE, McpClock, CanBitrate};
+    use controller::drivers::{can::{CanControllSettings, CanDriver, CanSettings, OperationTypes, CLKPRE, McpClock, CanBitrate}, message::CanMessage};
     use controller::boards::*;
     use cortex_m::asm;
     use embedded_hal::digital::OutputPin;
