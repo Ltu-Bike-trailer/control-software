@@ -1,10 +1,6 @@
 //! Defines some panic behavior and common utilities for the application.
-//!
-//! ## [Wrapper](wrapper)
-//!
-//! This module mainly exports a few helper types for unit conversion such as
-//! [degrees](wrapper::Degrees).
-
+#![allow(incomplete_features)]
+#![feature(generic_const_exprs)]
 #![no_main]
 #![no_std]
 #![feature(async_fn_traits)]
@@ -24,10 +20,6 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use defmt_rtt as _;
 use panic_probe as _;
-
-pub mod gain_scheduled;
-pub mod pid;
-pub mod wrapper;
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message
 // this prevents the panic message being printed *twice* when `defmt::panic` is

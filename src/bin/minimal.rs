@@ -39,8 +39,6 @@ mod app {
         // let token = rtic_monotonics::create_systick_token!();
         // rtic_monotonics::systick::Systick::new(cx.core.SYST, sysclk, token);
 
-        task1::spawn().ok();
-
         (
             Shared {
                 // Initialization of shared resources go here
@@ -62,7 +60,7 @@ mod app {
     }
 
     // TODO: Add tasks
-    #[task(priority = 1)]
+    #[task(priority = 1,shared=[])]
     async fn task1(_cx: task1::Context) {
         defmt::info!("Hello from task1!");
         for i in 0..20 {
