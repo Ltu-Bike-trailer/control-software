@@ -329,18 +329,12 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin> CanDriver<SPI, PIN>{
 
         self.change_settings(settings); 
 
-        let data: [u8; 4] = [0xDE, 0xAD, 0xBE, 0xEF];
-        let dummy_data = "dummy123".as_bytes();
+        let dummy_data = "dummy".as_bytes();
         defmt::println!("Dummy data length: {:?}", dummy_data.len());
 
         let dummy_id = StandardId::new(0x1).unwrap();
         let mut frame = CanMessage::new(embedded_can::Id::Standard(dummy_id), &dummy_data).unwrap();
         //let mut frame = CanMessage::new(embedded_can::Id::Standard(StandardId::ZERO), dummy_data).unwrap();
-       
-        let mut frame_id: u16 = 0x0000; 
-        if let embedded_can::Id::Standard(id) = frame.id {
-            frame_id = id.as_raw();
-        }
 
         //self.read_status();
         self.load_tx_buffer(TXBN::TXB0, frame);
