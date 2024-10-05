@@ -15,7 +15,6 @@ nrf52840-hal = { git = "https://github.com/Ltu-Bike-trailer/nrf-hal.git", featur
 #nrf52840-hal = { path = "../nrf-hal/nrf52840-hal", features = [
     "rt",
 ], default-features = false }
-
 rtic-monotonics = { version = "2.0.2", features = [
     "cortex-m-systick",
     "nrf52840",
