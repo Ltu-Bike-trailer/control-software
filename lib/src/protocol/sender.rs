@@ -219,6 +219,28 @@ impl<const N: usize> Sender<N> {
             BatteryStatus(voltage),
         )))
     }
+
+    /// Sets the left current sensors value.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the underlying message queue is full.
+    pub fn set_current_sense_left(&mut self, sensors: (u64, [f32; 3])) -> Result<(), OOM> {
+        self.enqueue(MessageType::Write(super::WriteType::Sensor(
+            super::SensorSubSystem::CurrentSenseLeft(super::CurrentMeasurement::from(sensors)),
+        )))
+    }
+
+    /// Sets the right current sensors value.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the underlying message queue is full.
+    pub fn set_current_sense_right(&mut self, sensors: (u64, [f32; 3])) -> Result<(), OOM> {
+        self.enqueue(MessageType::Write(super::WriteType::Sensor(
+            super::SensorSubSystem::CurrentSenseRight(super::CurrentMeasurement::from(sensors)),
+        )))
+    }
 }
 
 impl<const N: usize> Default for Sender<N> {

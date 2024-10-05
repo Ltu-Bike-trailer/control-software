@@ -17,6 +17,8 @@
 )]
 #![allow(clippy::manual_range_contains, clippy::single_match_else)]
 use core::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(feature = "esc")]
+pub mod bldc;
 
 use defmt_rtt as _;
 use panic_probe as _;

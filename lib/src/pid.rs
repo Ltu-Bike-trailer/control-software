@@ -111,7 +111,7 @@ pub struct PidDynamic<
 
 /// Wraps the info about a specific time step in the control sequence.
 #[derive(Debug)]
-pub struct ControlInfo<Output: Sized + defmt::Format> {
+pub struct ControlInfo<Output: Sized> {
     /// The expected value.
     pub reference: Output,
     /// The actual value read from the [`Channel`].
@@ -131,7 +131,7 @@ pub struct ControlInfo<Output: Sized + defmt::Format> {
 impl<
         Error: Debug,
         Interface: Channel<Error, Output = Output>,
-        Output: Sized + defmt::Format,
+        Output: Sized ,
         ConversionError: Debug,
         const BUFFER: usize,
         const KP: i32,
@@ -329,7 +329,7 @@ where
 impl<
         Error: Debug,
         Interface: Channel<Error, Output = Output>,
-        Output: Sized + defmt::Format,
+        Output: Sized,
         ConversionError: Debug,
         const BUFFER: usize,
         const KP: i32,
