@@ -13,7 +13,7 @@ rtic = { version = "2.1.1", features = ["thumbv7-backend"] }
 nrf52840-hal = { git = "https://github.com/nrf-rs/nrf-hal/", features = [
     "rt",
 ], default-features = false }
-rtic-monotonics = { version = "1.0.0", features = [
+rtic-monotonics = { version = "2.0.2", features = [
     "cortex-m-systick",
     "nrf52840",
 ] }
@@ -21,8 +21,11 @@ rtic-sync = "1.3.0"
 embedded-hal = "1.0.0"
 statics = { path = "./statics" }
 
-lib = { path = "./lib",default-features = false }
+lib = { path = "./lib", default-features = false }
 # Helpers
+
+#esc = { package = "bsp", git = "ssh://git@github.com/Ltu-Bike-trailer/ESC.git", rev = "1771ab9d6fb0f67e89c207a49fdd6a1285e1b2b1", optional = true, default-features = false}
+esc = { package = "bsp", path = "../ESC/bsp", optional = true, default-features = false }
 
 ## Defines a double ended queue implementation of arrays instead of vectors
 arraydeque = { version = "0.5.1", default-features = false }
@@ -60,7 +63,8 @@ overflow-checks = false  # <-
 
 
 [features]
-
+esc = ["dep:esc"]
+default = ["esc"]
 
 # uncomment this to switch from the crates.io version of defmt to its git version
 # check app-template's README for instructions
