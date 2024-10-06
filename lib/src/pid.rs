@@ -131,7 +131,7 @@ pub struct ControlInfo<Output: Sized> {
 impl<
         Error: Debug,
         Interface: Channel<Error, Output = Output>,
-        Output: Sized ,
+        Output: Sized,
         ConversionError: Debug,
         const BUFFER: usize,
         const KP: i32,
