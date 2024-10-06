@@ -23,7 +23,7 @@ impl<T: Instance> FloatDuty for Pwm<T> {
 /// Denotes the pattern in which we drive the BLDC motors on the ESC.
 #[derive(Default)]
 pub struct DrivePattern {
-    pattern: [u8; 6],
+    pattern: [u8; 7],
     idx: usize,
 }
 
@@ -34,6 +34,9 @@ impl DrivePattern {
         Self {
             idx: 0,
             pattern: [
+                0b01_00_10, // Initally assume that we are in 100 state. This allows initial
+                // driving of the motor. it might cost a litle extra current but this should be
+                // fine.
                 0b00_10_01, // 0b001
                 0b10_01_00, // 0b010
                 0b10_00_01, // 0b011

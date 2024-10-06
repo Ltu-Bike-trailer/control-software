@@ -19,6 +19,7 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(feature = "esc")]
 pub mod bldc;
+pub mod cart;
 
 use defmt_rtt as _;
 use panic_probe as _;
