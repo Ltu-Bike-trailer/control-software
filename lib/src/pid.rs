@@ -629,7 +629,7 @@ impl<const NOM: i64, const DENOM: i64> FixedPoint<NOM, DENOM> {
 impl<
         Error: Debug,
         Interface: Channel<Error, Output = Output>,
-        Output: Sized ,
+        Output: Sized,
         ConversionError: Debug,
         const BUFFER: usize,
         const KP: i32,
