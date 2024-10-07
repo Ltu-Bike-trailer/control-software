@@ -20,7 +20,8 @@ mod app {
     use controller::drivers::{can::{CanControllSettings, CanDriver, CanSettings, OperationTypes, CLKPRE, McpClock, CanBitrate}, message::CanMessage};
     use controller::boards::*;
     use cortex_m::asm;
-    use embedded_can::StandardId;
+    use embedded_can::{StandardId, Frame};
+    use embedded_can::nb::Can;
     use embedded_hal::digital::OutputPin;
     use embedded_hal::spi::SpiBus;
     use nrf52840_hal::{gpio::PullUp, gpiote::{Gpiote, GpioteInputPin}, pac::{Interrupt, GPIOTE, SPI1, SPIM0, SPIM1, SPIM2}};
@@ -29,7 +30,7 @@ mod app {
     use nrf52840_hal::gpio::{self, Level, Port, Pin, Output, PushPull, Input, Floating};
     use rtic_monotonics::nrf::timer::{fugit::ExtU64, Timer0 as Mono};
     use rtic_monotonics::nrf::{self, rtc::*};
-  
+     
 
     #[shared]
     struct Shared{
@@ -73,11 +74,10 @@ mod app {
         let cs_pin = port1.p1_08.into_push_pull_output(Level::High).degrade(); 
         let can_interrupt = port1.p1_06.into_pullup_input().degrade();
  
-
         let mut spi = Spi::new(device.SPI1, pins, Frequency::M1, MODE_0);
         let mut gpiote = Gpiote::new(device.GPIOTE);
         
-        let dummy_data = "dummy_1".as_bytes();
+        let dummy_data = "dummy".as_bytes();
 
         let settings = CanSettings::default(); // same as below
         
@@ -104,7 +104,8 @@ mod app {
         let dummy_id = StandardId::new(0x1).unwrap();
         defmt::info!("dummy_data: {:?}", dummy_data.len());
         let mut frame = CanMessage::new(embedded_can::Id::Standard(dummy_id), &dummy_data).unwrap();
-        can_driver.loopback_test(frame);
+        //can_driver.loopback_test(frame);
+        can_driver.transmit(&frame);
 
         (
             Shared {gpiote},
@@ -131,17 +132,6 @@ mod app {
             if (cx.local.candriver.interrupt_is_cleared()){
                 defmt::info!("All CAN interrupt has been handled!");
                 gpiote.reset_events(); //Execute when all Events are handled. 
-                
-                /*
-                if (*cx.local.counter < 4){
-                    let count_id = *cx.local.counter;
-                    let dummy_data = "dummy_2".as_bytes();
-                    let dummy_id = StandardId::new(count_id).unwrap();
-                    let mut frame = CanMessage::new(embedded_can::Id::Standard(dummy_id), &dummy_data).unwrap();
-                    cx.local.candriver.loopback_test(frame);
-                }
-                *cx.local.counter += 1;
-                */
             }
         });
     }

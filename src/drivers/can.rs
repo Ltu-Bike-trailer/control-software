@@ -58,7 +58,7 @@ enum InstructionCommand {
     Status = 0xA0, //1010_0000
     Modify = 0x05,
     LoadTX = 0x40, //FIX to target B0, B1, or B2 buffers
-    RTS = 0x87,
+    RTS = 0x80, // 10000nnn
     ReadRxb0 = 0x90, // 0b10010000
     ReadRxb1 = 0x94, // 0b10010100
     RxStatus = 0xB0
@@ -71,7 +71,7 @@ enum InstructionCommand {
 //    010 = Set Loopback mode
 //    011 = Set Listen-only mode
 //    100 = Set Configuration mode
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum OperationTypes {
     Configuration = 0b100,
@@ -131,7 +131,7 @@ enum MCP2515Register{
     CANINTF = 0x2C, // 00101100
 
     BFPCTRL = 0x0C,
-    TXRTSCTRL = 0x0D,
+    TXRTSCTRL = 0x0D, //00001101
     TEC = 0x1C,
     REC = 0x1D,
     CNF1 = 0x2A,
@@ -230,6 +230,7 @@ pub struct CanSettings{
     pub mcp_clk: McpClock, // Clock Frequency for MCP2515. 
     pub can_bitrate: CanBitrate,
     pub interrupts: u8, // mask for the enabled interrupt type bits
+    //TODO: - Should I add which target TXBN buffers is active?
 }
 
 
@@ -303,6 +304,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> Can for C
     type Error = CanError;
     
     fn transmit(&mut self, frame: &Self::Frame) -> nb::Result<Option<Self::Frame>, Self::Error> {
+        defmt::info!("Executing 'self.transmit_can(frame)");
         self.transmit_can(frame); // This is the custom driver logic for transmitting on the CAN bus. 
         Ok(None)
     }
@@ -381,10 +383,10 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         Ok(())
     }
 
-    fn change_settings(&mut self, settings: CanControllSettings){
-        self.can_settings.canctrl = settings;
+    fn change_settings(&mut self, settings: CanSettings){
+        self.can_settings.canctrl = settings.canctrl;
 
-        let bitmask_canctrl = self.get_canctrl_mask(settings);
+        let bitmask_canctrl = self.get_canctrl_mask(self.can_settings.canctrl);
         self.write_register(MCP2515Register::CANCTRL, bitmask_canctrl);
         let canstat = self.read_register(MCP2515Register::CANSTAT, 0x00).unwrap();
         
@@ -413,15 +415,11 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
     /// ... let byte_msg: [u8; 3] = [InstructionCommand::Write as u8, MCP2515Register::TXB0CTRL as u8, data];
     pub fn loopback_test(&mut self, can_msg: CanMessage){
         defmt::info!("Loopback Test:");
-        let settings = CanControllSettings{
-            mode: OperationTypes::Loopback,
-            clken: false,
-            clkpre: CLKPRE::DIV1,
-            osm: false,
-            abat: false,
-        };
+        let mut can_settings = CanSettings::default();
+        let canctrl_settings = CanControllSettings::new(OperationTypes::Loopback, false, CLKPRE::DIV1, false, false);
+        can_settings.canctrl = canctrl_settings;
 
-        self.change_settings(settings); 
+        self.change_settings(can_settings); 
 
         let dummy_data = "dummy".as_bytes();
         defmt::println!("Dummy data length: {:?}", dummy_data.len());
@@ -519,7 +517,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
             TXBN::TXB1 => (InstructionCommand::RTS as u8 | 0x02),
             TXBN::TXB2 => (InstructionCommand::RTS as u8 | 0x04),
         };
-
+        
         let mut instruction_msg: [u8; 1] = [rts_instruction];
         self.cs.set_low();
         self.write(&instruction_msg);
@@ -611,6 +609,8 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
     /// Hence should be called before writing to the transmit buffer. 
     /// Setting the flag to true, would flag a message buffer as being ready for transmission.
     fn tx_pending(&mut self, is_pending: bool) -> &mut Self{
+        //TODO: - Add which TX buffer to set as ready, by adding argument.
+
         defmt::info!("Logic for tx_pending:");
         const CLEAR: u8 = 0u8;
         const FILTERMASKOFF: u8 = 0b0110_0000;
@@ -653,11 +653,16 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
 
         self.write_register(MCP2515Register::CANCTRL, canctrl_byte);
         let canctrl_bits = self.read_register(MCP2515Register::CANCTRL, 0x00).unwrap(); 
-        
+       
+        //self.write_register(MCP2515Register::TXRTSCTRL, 0b0000_1001);
+        let txrtscttrl_reg =self.read_register(MCP2515Register::TXRTSCTRL, 0x00).unwrap();
+
+
         /* The requested mode must be varified by reading the OPMOD[2:0] bits (CANSTAT[7:5])*/
         let canstat_new =self.read_register(MCP2515Register::CANSTAT, 0x00).unwrap();
         defmt::println!("CANCTRL after setup is: {:08b}", canctrl_bits);  
         defmt::println!("CANSTAT after setup is: {:08b}", canstat_new);  
+        defmt::println!("TXRTSCTRL after setup is: {:08b}", txrtscttrl_reg);  
 
         self
     }
@@ -665,15 +670,32 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
 
     fn transmit_can(&mut self, can_msg: &CanMessage){
         //Pull the CS pin LOW.
-        self.cs.set_low().map_err(|_| CanDriverError::SpiError);
+        //self.cs.set_low().map_err(|_| CanDriverError::SpiError);
+
+        //WARN: - Testing is done with 'One-Shot Mode'. 
+        //Which will attempt to transmit one time only. 
         
-        let instruction = InstructionCommand::Write as u8;
-        self.spi.write(&[instruction]);
+        /* "Normally, if a CAN message loses arbitration, or is destroyed by an error
+           frame, the message is retransmitted. With One-shot
+           mode enabled, a message will only attempt to transmit
+           one time, regardless of arbitration loss or error frame" */
 
-        self.spi.write(can_msg.data());
-
-        // Deselect MCP2515 module by pulling CS pin high.
-        self.cs.set_high();
+        if (self.can_settings.canctrl.mode != OperationTypes::Normal){
+            let mut can_settings = CanSettings::default();
+            let canctrl_settings = CanControllSettings::new(OperationTypes::Normal, false, CLKPRE::DIV1, false, true);
+            can_settings.canctrl = canctrl_settings;
+            defmt::info!("Setting Operation Type to: Normal mode");
+            self.change_settings(can_settings);
+            //self.tx_pending(false);
+        }
+        let can_frame = CanMessage::new(can_msg.id, &can_msg.data).unwrap();
+       
+        //TODO: - Add TXBnCTRL configuration for TXP (Transmit Buffer Priority), during self init.
+        
+        // WARN: - buffer argument is hardcoded atm, just for testing!
+        self.load_tx_buffer(TXBN::TXB0, can_frame); // How should I handle buffer target for transmission
+        self.request_to_send(TXBN::TXB0);
+        self.read_rx_buffer(RXBN::RXB0);
     }
 
     fn receive_can(&mut self){
@@ -713,7 +735,10 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         /* Prior sending the message: 
          * "The TXREQ bit (TXBnCTRL[3]) must be clear (indicating the transmit buffer is not
          * pending transmission) before writing to the transmit buffer".
-         */ 
+         */
+
+       
+
     }
   
       fn setup_interrupt(&mut self, can_settings: &CanSettings) -> &mut Self {
@@ -745,8 +770,9 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         // ...the next highest priority interrupt that is pending (if any) will be reflected...
         // ...by the ICOD bits. 
         
+        //let settings = can_settings.enable_interrupts(&[CanInte::TX2IE, CanInte::TX1IE, CanInte::TX0IE, CanInte::RX1IE, CanInte::RX0IE]);
 
-        let settings = can_settings.enable_interrupts(&[CanInte::TX2IE, CanInte::TX1IE, CanInte::TX0IE, CanInte::RX1IE, CanInte::RX0IE]);
+        let settings = can_settings.enable_interrupts(&[CanInte::MERRE, CanInte::TX2IE, CanInte::TX1IE, CanInte::TX0IE, CanInte::RX1IE, CanInte::RX0IE]);
         self.can_settings.interrupts = settings.interrupts;
 
         defmt::info!("Enable interrupt mask: {:08b}", settings.interrupts);
@@ -803,13 +829,24 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         
         let canintf = self.read_register(MCP2515Register::CANINTF, 0x00).unwrap();
         let canstat = self.read_register(MCP2515Register::CANSTAT, 0x00).unwrap();
-        
+        let errorflag_reg = self.read_register(MCP2515Register::EFLG, 0x00).unwrap();
+        let txbnctrl = self.read_register(MCP2515Register::TXB0CTRL, 0x00).unwrap();
+
         defmt::info!("CANINTF register bits: {:08b}", canintf);
         defmt::info!("CANSTAT register bits: {:08b}", canstat);
+        defmt::info!("EFLG register bits: {:08b}", errorflag_reg);
+        defmt::info!("TXBnCTRL register bits: {:08b}", txbnctrl);
+
 
         match received_interrupt {
-            InterruptFlagCode::NoInterrupt =>{},
-            InterruptFlagCode::ErrorInterrupt =>{},
+            InterruptFlagCode::NoInterrupt =>{
+                self.clear_interrupt_flag(canintf, 7);
+
+            },
+            InterruptFlagCode::ErrorInterrupt =>{
+                defmt::info!("Received Error Interrupt, with flags: {:08b}", canstat);
+                self.clear_interrupt_flag(canintf, 5);
+            },
             InterruptFlagCode::WakeUpInterrupt =>{},
             InterruptFlagCode::TXB0Interrupt => {
                 defmt::println!("TXB0 successfully transmitted a message!");
