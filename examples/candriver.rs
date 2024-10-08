@@ -21,10 +21,10 @@ mod app {
     use controller::boards::*;
     use cortex_m::asm;
     use embedded_can::{StandardId, Frame};
-    use embedded_can::nb::Can;
+    use embedded_can::blocking::Can;
     use embedded_hal::digital::OutputPin;
     use embedded_hal::spi::SpiBus;
-    use nrf52840_hal::{gpio::PullUp, gpiote::{Gpiote, GpioteInputPin}, pac::{Interrupt, GPIOTE, SPI1, SPIM0, SPIM1, SPIM2}};
+    use nrf52840_hal::{gpio::PullUp, gpiote::{Gpiote, GpioteInputPin}, pac::{Interrupt, GPIOTE, SPI1, SPI2, SPIM0, SPIM1, SPIM2}};
     use nrf52840_hal::{spim, Clocks};
     use nrf52840_hal::{pac::SPI0, spi::Spi, spi::Frequency, spim::*};
     use nrf52840_hal::gpio::{self, Level, Port, Pin, Output, PushPull, Input, Floating};
@@ -40,6 +40,7 @@ mod app {
     #[local]
     struct Local {
         candriver: CanDriver<Spi<SPI1>, Pin<Output<PushPull>>, Pin<Input<PullUp>>>,
+        candriver_node: CanDriver<Spi<SPI2>, Pin<Output<PushPull>>, Pin<Input<PullUp>>>,
     }
 
     #[init]
@@ -70,21 +71,32 @@ mod app {
             mosi: Some(port0.p0_06.into_push_pull_output(Level::Low).degrade()),
             miso: Some(port0.p0_07.into_floating_input().degrade()),
         };
+
+        let pins_node = nrf52840_hal::spi::Pins{
+            sck: Some(port0.p0_04.into_push_pull_output(Level::Low).degrade()),
+            mosi: Some(port0.p0_03.into_push_pull_output(Level::Low).degrade()),
+            miso: Some(port0.p0_10.into_floating_input().degrade()),
+        };
         
-        let cs_pin = port1.p1_08.into_push_pull_output(Level::High).degrade(); 
-        let can_interrupt = port1.p1_06.into_pullup_input().degrade();
- 
+        let cs_pin = port1.p1_02.into_push_pull_output(Level::High).degrade(); 
+        let can_interrupt = port1.p1_01.into_pullup_input().degrade();
+
+        let cs_node_pin = port1.p1_10.into_push_pull_output(Level::High).degrade();
+        let can_node_interrupt = port1.p1_11.into_pullup_input().degrade();
+
         let mut spi = Spi::new(device.SPI1, pins, Frequency::M1, MODE_0);
+        let mut spi_node = Spi::new(device.SPI2, pins_node, Frequency::M1, MODE_0);
         let mut gpiote = Gpiote::new(device.GPIOTE);
         
         let dummy_data = "dummy".as_bytes();
 
         let settings = CanSettings::default(); // same as below
         
+        const CLKEN: bool = true;         
         const OSM: bool = false;
         const ABAT: bool = false; 
 
-        let canctrl_settings = CanControllSettings::new(OperationTypes::Configuration, false, CLKPRE::DIV1, ABAT, OSM);
+        let canctrl_settings = CanControllSettings::new(OperationTypes::Configuration, CLKEN, CLKPRE::DIV1, ABAT, OSM);
         
         let can_settings = CanSettings{
             canctrl: canctrl_settings,
@@ -94,22 +106,30 @@ mod app {
         };
         
         let mut can_driver = CanDriver::init(spi, cs_pin, can_interrupt, can_settings);
-        
+        let mut can_node = CanDriver::init(spi_node, cs_node_pin, can_node_interrupt, can_settings);
+
          gpiote.channel0()
             .input_pin(&can_driver.interrupt_pin)
+            .hi_to_lo()
+            .enable_interrupt();
+
+        gpiote.channel1()
+            .input_pin(&can_node.interrupt_pin)
             .hi_to_lo()
             .enable_interrupt();
 
         defmt::println!("After initializing Spi<SPI1>...");
         let dummy_id = StandardId::new(0x1).unwrap();
         defmt::info!("dummy_data: {:?}", dummy_data.len());
-        let mut frame = CanMessage::new(embedded_can::Id::Standard(dummy_id), &dummy_data).unwrap();
+        let mut frame = CanMessage::new(embedded_can::Id::Standard(StandardId::ZERO), &[0x01, 0x02, 0x03]).unwrap();
+       
         //can_driver.loopback_test(frame);
-        can_driver.transmit(&frame);
-
+        //can_driver.transmit(&frame);
+        can_node.transmit(&frame);
+        //can_node.loopback_test(frame);
         (
             Shared {gpiote},
-            Local {candriver: can_driver},
+            Local {candriver: can_driver, candriver_node: can_node},
         )
     }
 
@@ -122,16 +142,28 @@ mod app {
         }
     }
 
-    #[task(binds = GPIOTE, shared = [gpiote], local = [candriver, counter: u16 = 0])]
+    #[task(binds = GPIOTE, shared = [gpiote], local = [candriver, candriver_node, counter: u16 = 0])]
     fn can_interrupt(mut cx: can_interrupt::Context){
         let handle = cx.shared.gpiote.lock(|gpiote|{
-            defmt::info!("GPIOTE interrupt occured!");
-            let interrupt_type = cx.local.candriver.interrupt_decode();
-            cx.local.candriver.handle_interrupt(interrupt_type);
            
-            if (cx.local.candriver.interrupt_is_cleared()){
-                defmt::info!("All CAN interrupt has been handled!");
-                gpiote.reset_events(); //Execute when all Events are handled. 
+            if (gpiote.channel0().is_event_triggered()){
+                defmt::info!("GPIOTE interrupt occured, for Can Master at channel 0!");
+                let interrupt_type = cx.local.candriver.interrupt_decode();
+                cx.local.candriver.handle_interrupt(interrupt_type).unwrap();
+           
+                if (cx.local.candriver.interrupt_is_cleared()){
+                    defmt::info!("All CAN interrupt has been handled!");
+                    gpiote.channel0().reset_events();
+                    //gpiote.reset_events(); //Execute when all Events are handled. 
+                }
+            }else if (gpiote.channel1().is_event_triggered()) {
+                defmt::info!("GPIOTE interrupt occured, for Can Node at channel 1!");
+                let interrupt_type = cx.local.candriver_node.interrupt_decode();
+                cx.local.candriver_node.handle_interrupt(interrupt_type).unwrap(); 
+                
+                if (cx.local.candriver_node.interrupt_is_cleared()){
+                    gpiote.channel1().reset_events();
+                }                
             }
         });
     }
