@@ -9,6 +9,7 @@ use core::{str, usize};
 use digital::ErrorKind;
 use embedded_can::StandardId;
 use nrf52840_hal::comp::OperationMode;
+use nrf52840_hal::pac::i2s::config::format;
 use nrf52840_hal::{self as _, spi};
 use nrf52840_hal::gpio::{Level, Port};
 use cortex_m::asm as _;
@@ -19,8 +20,10 @@ use embedded_hal::digital::OutputPin;
 use embedded_hal::spi::SpiBus;
 use embedded_can::{Error, Frame, nb::Can};
 use nb;
+use defmt::{Format, Formatter, write};
 
 ///
+#[derive(Debug)]
 pub struct CanMessage{
     pub id: embedded_can::Id,
     pub dlc: u8, // Data length code = length of data field. 
@@ -72,9 +75,26 @@ impl CanMessage {
             dlc: _dlc,
             data: [0u8; 8],
         };
-
         can_msg.data[.._dlc as usize].copy_from_slice(data);
+        defmt::info!("New CanMessage:\ndlc: {:?}\ndata:{:08b}", _dlc, can_msg.data);
         return Some(can_msg);
+    }
+
+    pub fn id_raw(&mut self) -> u16 {
+        let mut raw_id: u16;        
+        if let embedded_can::Id::Standard(id) = self.id {
+            raw_id = id.as_raw();
+        } else {
+            raw_id = 0;
+        }
+        raw_id
+    }
+
+    pub fn print_frame(&mut self){
+        let id = self.id_raw();
+        let dlc = self.dlc;
+        let data = self.data();
+        defmt::info!("Id({:x}), DLC({:x}), Data({:08b})", id, dlc, data);
     }
 
     pub fn to_bytes(&mut self) -> [u8; 13] {
@@ -101,7 +121,7 @@ impl CanMessage {
 
         let data_start = 5 as usize;
         let data_end = data_start + self.dlc(); 
-
+        defmt::info!("Inside to_bytes logic, dlc: {:08b}", self.dlc());
         /*
         byte_frame = [sidh, sidl, extended_id8, extended_id0, self.dlc() as u8, 
             self.data[0], self.data[1], self.data[2], self.data[3], self.data[4], 
@@ -116,10 +136,12 @@ impl CanMessage {
         return byte_frame;
     }
 
+    /*
     pub fn data_to_string(data: &[u8]) -> &str{
         let data_str = str::from_utf8(&data).unwrap();
         data_str
     }
+    */
     
 }
 
@@ -136,8 +158,12 @@ impl From<[u8;13]> for CanMessage{
         
         let data_start = 5 as usize;
         let data_end = data_start + dlc as usize; 
-        let mut _data = &byte_data[data_start..data_end];
+        defmt::info!("dlc: {:?}", dlc);
 
+        defmt::info!("data range: {:?}:{:?}", data_start, data_end);
+
+        let mut _data = &byte_data[data_start..];
+        
         //data[0..].copy_from_slice(&byte_data[5..]);
         // Shift MSB u16 SIDH part and OR the LSB u16 SIDL part 
         raw_id = ((slice_sidh << 3) + (slice_sidl >> 5));
@@ -147,7 +173,7 @@ impl From<[u8;13]> for CanMessage{
         defmt::println!("CanMessage::from, lower_bits: {:016b}", slice_sidl);
         defmt::println!("CanMessage::from, raw_id: {:016b}", raw_id);
         defmt::println!("data length (DLC): {:?}", _data.len());        
-        defmt::println!("CanMessage::from, data slice: {:08b}, data as str: {}", _data, CanMessage::data_to_string(_data));
+       // defmt::println!("CanMessage::from, data slice: {:08b}, data as str: {}", _data, CanMessage::data_to_string(_data));
 
         //WARN: - Would return None, if raw is out of range of an 11 bit integer.   
         let frame_id = StandardId::new(raw_id).unwrap();
