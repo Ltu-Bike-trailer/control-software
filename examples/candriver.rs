@@ -61,7 +61,13 @@ mod app {
         device.TWIM1.enable.write(|w| w.enable().disabled());
         device.TWIS1.enable.write(|w| w.enable().disabled());
         device.TWI1.enable.write(|w| w.enable().disabled());
-       
+      
+        device.SPIM0.enable.write(|w| w.enable().disabled());        
+        device.SPIS0.enable.write(|w| w.enable().disabled());
+        device.TWIM0.enable.write(|w| w.enable().disabled());
+        device.TWIS0.enable.write(|w| w.enable().disabled());
+        device.TWI0.enable.write(|w| w.enable().disabled());
+
         //let pin_mapping = PinMapping::new(port0, port1);
         //let (pin_map, spi) =pin_mapping.can(device.SPIM1);
 
@@ -74,15 +80,15 @@ mod app {
 
         let pins_node = nrf52840_hal::spi::Pins{
             sck: Some(port0.p0_04.into_push_pull_output(Level::Low).degrade()),
-            mosi: Some(port0.p0_03.into_push_pull_output(Level::Low).degrade()),
-            miso: Some(port0.p0_10.into_floating_input().degrade()),
+            mosi: Some(port0.p0_11.into_push_pull_output(Level::Low).degrade()),
+            miso: Some(port0.p0_08.into_floating_input().degrade()),
         };
         
         let cs_pin = port1.p1_02.into_push_pull_output(Level::High).degrade(); 
         let can_interrupt = port1.p1_01.into_pullup_input().degrade();
 
-        let cs_node_pin = port1.p1_10.into_push_pull_output(Level::High).degrade();
-        let can_node_interrupt = port1.p1_11.into_pullup_input().degrade();
+        let cs_node_pin = port1.p1_08.into_push_pull_output(Level::High).degrade();
+        let can_node_interrupt = port1.p1_07.into_pullup_input().degrade();
 
         let mut spi = Spi::new(device.SPI1, pins, Frequency::M1, MODE_0);
         let mut spi_node = Spi::new(device.SPI2, pins_node, Frequency::M1, MODE_0);
@@ -121,11 +127,11 @@ mod app {
         defmt::println!("After initializing Spi<SPI1>...");
         let dummy_id = StandardId::new(0x1).unwrap();
         defmt::info!("dummy_data: {:?}", dummy_data.len());
-        let mut frame = CanMessage::new(embedded_can::Id::Standard(StandardId::ZERO), &[0x01, 0x02, 0x03]).unwrap();
+        let mut frame = CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02, 0x03]).unwrap();
        
         //can_driver.loopback_test(frame);
-        //can_driver.transmit(&frame);
-        can_node.transmit(&frame);
+        can_driver.transmit(&frame);
+        //can_node.transmit(&frame);
         //can_node.loopback_test(frame);
         (
             Shared {gpiote},
@@ -147,24 +153,32 @@ mod app {
         let handle = cx.shared.gpiote.lock(|gpiote|{
            
             if (gpiote.channel0().is_event_triggered()){
+                defmt::println!("\n");
                 defmt::info!("GPIOTE interrupt occured, for Can Master at channel 0!");
-                let interrupt_type = cx.local.candriver.interrupt_decode();
-                cx.local.candriver.handle_interrupt(interrupt_type).unwrap();
+                let interrupt_type = cx.local.candriver.interrupt_decode().unwrap();
+                cx.local.candriver.handle_interrupt(interrupt_type);
            
                 if (cx.local.candriver.interrupt_is_cleared()){
                     defmt::info!("All CAN interrupt has been handled!");
                     gpiote.channel0().reset_events();
                     //gpiote.reset_events(); //Execute when all Events are handled. 
                 }
-            }else if (gpiote.channel1().is_event_triggered()) {
+                defmt::println!("\n");
+
+            }
+            if (gpiote.channel1().is_event_triggered()) {
+                defmt::println!("\n");
                 defmt::info!("GPIOTE interrupt occured, for Can Node at channel 1!");
-                let interrupt_type = cx.local.candriver_node.interrupt_decode();
-                cx.local.candriver_node.handle_interrupt(interrupt_type).unwrap(); 
-                
+                let interrupt_type = cx.local.candriver_node.interrupt_decode().unwrap();
+                cx.local.candriver_node.handle_interrupt(interrupt_type); 
+
                 if (cx.local.candriver_node.interrupt_is_cleared()){
                     gpiote.channel1().reset_events();
-                }                
+                }       
+                defmt::println!("\n");
             }
+
+            //gpiote.reset_events();
         });
     }
 }

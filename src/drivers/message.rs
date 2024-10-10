@@ -76,7 +76,6 @@ impl CanMessage {
             data: [0u8; 8],
         };
         can_msg.data[.._dlc as usize].copy_from_slice(data);
-        defmt::info!("New CanMessage:\ndlc: {:?}\ndata:{:08b}", _dlc, can_msg.data);
         return Some(can_msg);
     }
 
@@ -116,12 +115,13 @@ impl CanMessage {
         let extended_id8: u8 = 0;  
         let extended_id0: u8 = 0;
 
-        defmt::info!("to_bytes: \nSIDH: {:08b}\nSIDL: {:08b}\nEID8: {:08b}\nEID0: {:08b}", 
+        /*
+        defmt::println!("to_bytes: \nSIDH: {:08b}\nSIDL: {:08b}\nEID8: {:08b}\nEID0: {:08b}", 
             sidh, sidl, extended_id8, extended_id0);
-
+        */
         let data_start = 5 as usize;
         let data_end = data_start + self.dlc(); 
-        defmt::info!("Inside to_bytes logic, dlc: {:08b}", self.dlc());
+        //defmt::info!("Inside to_bytes logic, dlc: {:08b}", self.dlc());
         /*
         byte_frame = [sidh, sidl, extended_id8, extended_id0, self.dlc() as u8, 
             self.data[0], self.data[1], self.data[2], self.data[3], self.data[4], 
@@ -130,8 +130,8 @@ impl CanMessage {
         byte_frame[0..data_start].copy_from_slice(&[sidh, sidl, extended_id8, extended_id0, self.dlc() as u8]);
         byte_frame[data_start..data_end].copy_from_slice(&self.data[0..self.dlc()]); 
 
-        defmt::info!("In to_bytes logic, self.data() contains: {:08b}", self.data());
-        defmt::info!("In to_bytes logic, self.data() vs self.data field: {:08b}", self.data);
+        //defmt::info!("In to_bytes logic, self.data() contains: {:08b}", self.data());
+        //defmt::info!("In to_bytes logic, self.data() vs self.data field: {:08b}", self.data);
        
         return byte_frame;
     }
@@ -158,9 +158,9 @@ impl From<[u8;13]> for CanMessage{
         
         let data_start = 5 as usize;
         let data_end = data_start + dlc as usize; 
-        defmt::info!("dlc: {:?}", dlc);
+        //defmt::info!("dlc: {:?}", dlc);
 
-        defmt::info!("data range: {:?}:{:?}", data_start, data_end);
+        //defmt::info!("data range: {:?}:{:?}", data_start, data_end);
 
         let mut _data = &byte_data[data_start..];
         
@@ -168,11 +168,11 @@ impl From<[u8;13]> for CanMessage{
         // Shift MSB u16 SIDH part and OR the LSB u16 SIDL part 
         raw_id = ((slice_sidh << 3) + (slice_sidl >> 5));
         
-        defmt::println!("byte_data[0] = SIDH reg: {:08b}", byte_data[0]);
-        defmt::println!("byte_data[1] = SIDL reg: {:08b}", byte_data[1]);
-        defmt::println!("CanMessage::from, lower_bits: {:016b}", slice_sidl);
-        defmt::println!("CanMessage::from, raw_id: {:016b}", raw_id);
-        defmt::println!("data length (DLC): {:?}", _data.len());        
+        //defmt::println!("byte_data[0] = SIDH reg: {:08b}", byte_data[0]);
+        //defmt::println!("byte_data[1] = SIDL reg: {:08b}", byte_data[1]);
+        //defmt::println!("CanMessage::from, lower_bits: {:016b}", slice_sidl);
+        //defmt::println!("CanMessage::from, raw_id: {:016b}", raw_id);
+        //defmt::println!("data length (DLC): {:?}", _data.len());        
        // defmt::println!("CanMessage::from, data slice: {:08b}, data as str: {}", _data, CanMessage::data_to_string(_data));
 
         //WARN: - Would return None, if raw is out of range of an 11 bit integer.   
