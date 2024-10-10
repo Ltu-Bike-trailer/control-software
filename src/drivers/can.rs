@@ -4,18 +4,14 @@
 #![allow(missing_docs)]
 
 use core::{borrow::Borrow, str, usize};
-
-
 use cortex_m::asm as _;
-
-use core::borrow::Borrow;
-use core::{str, usize};
 use digital::ErrorKind;
 use embedded_can::{Id, StandardId};
 use nrf52840_hal::comp::OperationMode;
 use nrf52840_hal::{self as _, spi};
 use nrf52840_hal::gpio::{Level, Port};
 use nrf52840_hal::gpiote::{Gpiote, GpioteInputPin};
+use nrf52840_hal::pac::nfct::framestatus::RX;
 
 use cortex_m_rt::entry;
 use defmt::Format;
@@ -26,14 +22,6 @@ use embedded_hal::digital::{OutputPin, InputPin};
 use embedded_hal::spi::SpiBus;
 use embedded_can::{Error, Frame, blocking::Can};
 use nb;
-use nrf52840_hal::{
-    self as _,
-    comp::OperationMode,
-    gpio::{Level, Port},
-    gpiote::{Gpiote, GpioteInputPin},
-    pac::nfct::framestatus::RX,
-    spi,
-};
 
 use super::message::CanMessage;
 
@@ -426,12 +414,6 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         defmt::println!("TXREQ register: {:08b}", received_reg);
         defmt::println!("TXRTSCTRL register: {:08b}", rts_reg);
      
-        //let normal_mode = CanControllSettings::new(OperationTypes::Normal, true, CLKPRE::DIV1, false, false);
-        //let mask = driver.get_canctrl_mask(normal_mode);
-        //driver.write_register(MCP2515Register::CANCTRL, mask);
-        //let canctrl = driver.read_register(MCP2515Register::CANCTRL, 0x00).unwrap();
-        //defmt::println!("CANCTRL register: {:08b}", canctrl);
-
         driver.activate_canbus();
 
         if (driver.can_settings.canctrl.mode != OperationTypes::Normal){
@@ -791,14 +773,8 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         self.write_register(MCP2515Register::TXRTSCTRL, 0b0000_0011);
         self.write_register(MCP2515Register::BFPCTRL, 0b0000_0011);
        
-
         let txrtscttrl_reg = self.read_register(MCP2515Register::TXRTSCTRL, 0x00).unwrap();
         let bfpctrl_reg = self.read_register(MCP2515Register::BFPCTRL, 0x00).unwrap();
-
-        //self.write_register(MCP2515Register::TXRTSCTRL, 0b0000_1001);
-        let txrtscttrl_reg = self
-            .read_register(MCP2515Register::TXRTSCTRL, 0x00)
-            .unwrap();
 
         /* The requested mode must be varified by reading the OPMOD[2:0] bits (CANSTAT[7:5])*/
         let canstat_new = self.read_register(MCP2515Register::CANSTAT, 0x00).unwrap();
@@ -931,19 +907,6 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
 
         self
     }
-
-    fn start_transmission(&mut self, instruction: InstructionCommand, address_byte: u8) {
-        // 1. Need to set the TXBnCTRL.TXREQ bit for each buffer
-        // 2. Configure using the TXRTSCTRL register (need to be in
-        //    'configuration mode').
-        // Format: [u8; N] --> [Instruction byte, Address byte, Data byte]
-
-        /* Prior sending the message:
-         * "The TXREQ bit (TXBnCTRL[3]) must be clear (indicating the
-         * transmit buffer is not pending transmission) before
-         * writing to the transmit buffer".
-         */
-    }
   
     fn setup_interrupt(&mut self, can_settings: &CanSettings) -> &mut Self {
         // The TXnIE bit in the CANINTE register need to be toggled/set to enable
@@ -1000,15 +963,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
     fn clear_interrupt_flag(&mut self, bit_pos: u8){
         //defmt::info!("---Inside 'clear_interrupt_flag' logic---");
         let canintf = self.read_register(MCP2515Register::CANINTF, 0x00).unwrap();
-
         let mut mask_bytes: u8 = self.can_settings.interrupts; // enabled target interrupt bits.
-
-        // determine what value the modified bits will change
-
-        //CanInte::TX0IE = 0b0000_0100
-        //                     AND
-        // value =         0b1111_1011
-        // ->
         let mut data_bytes = canintf ^ (1 << bit_pos); //0bxxxx_1011 for clearing TX0IF
 
         self.cs.set_low();
