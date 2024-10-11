@@ -259,8 +259,6 @@ pub struct CanSettings {
     pub mcp_clk: McpClock, // Clock Frequency for MCP2515.
     pub can_bitrate: CanBitrate,
     pub interrupts: u8, 
-    /* mask for the enabled interrupt type bits
-     *TODO: - Should I add which target TXBN buffers is active? */
 }
 
 impl CanControllSettings {
@@ -299,8 +297,6 @@ impl CanSettings {
             .for_each(|el| self.interrupts |= *el as u8);
         self
     }
-
-    fn canctrl_bitmask(&mut self) {}
 }
 
 impl TryFrom<u8> for InterruptFlagCode {
@@ -448,7 +444,6 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
     }
 
     fn write(&mut self, data: &[u8]) {
-        /* example: self.spi.write(&[0b01000101,*byte]); */
         self.spi.write(data);
     }
 
@@ -483,7 +478,6 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
     /// byte]. For writing to a specific register
     fn write_register(&mut self, reg: MCP2515Register, data: u8) -> Result<(), SPI::Error> {
         let reg_address: u8 = reg as u8;
-        let maskbit: u8;
         let mut byte_msg: [u8; 3] = [InstructionCommand::Write as u8, reg_address, data];
 
         self.cs.set_low();
@@ -577,7 +571,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
     }
 
     /// Method for applying the CAN controller settings by getting the bitmask.
-    /// Format for setting bit: N = N | (1<<k)
+    /// Format for setting bit: N = N | (1<<k).
     pub fn get_canctrl_mask(&mut self, canctrl_settings: CanControllSettings) -> u8 {
         let mut canctrl_byte = 0u8; // (1): data_byte |= (reg_value << reg_pos)
         let mode_bits: u8 = (canctrl_settings.mode as u8) << 5; //REQOP[2:0] (bits 7-5)
@@ -623,6 +617,11 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         defmt::info!("Read Status: {:08b}", data_out);
     }
 
+    /// RX Status Instruction. 
+    ///
+    /// ## NOTE 
+    ///
+    ///
     fn rx_status(&mut self) {
         let instruction_msg: [u8; 3] = [InstructionCommand::RxStatus as u8, 0x00, 0x00];
         let mut data_out: [u8; 3] = [0; 3];
@@ -636,6 +635,9 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         );
     }
 
+    /// RTS - Request-To-Send instruction. 
+    /// This is called after a Load TX instruction has been runned.
+    /// It will work, when TXREQ bits are set to 1, indicating TX is pending.  
     fn request_to_send(&mut self, buffer: TXBN) {
         let rts_instruction: u8 = match buffer {
             TXBN::TXB0 => (InstructionCommand::RTS as u8 | 0x01),
@@ -643,7 +645,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
             TXBN::TXB2 => (InstructionCommand::RTS as u8 | 0x04),
         };
 
-        defmt::println!("Request-To-Send instruction: {:08b}", rts_instruction); 
+        //defmt::println!("Request-To-Send instruction: {:08b}", rts_instruction); 
         let mut instruction_msg: [u8; 1] = [rts_instruction];
         self.cs.set_low();
         self.write(&instruction_msg);
@@ -651,12 +653,12 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         self.tx_pending(false);
     }
 
+    /// Performs 'Load TX' Instruction
     fn load_tx_buffer(&mut self, buffer: TXBN, mut data_in: CanMessage) {
         defmt::println!("------> Load TX buffer instruction:");
         
         let instruction = match buffer {
-            TXBN::TXB0 => InstructionCommand::LoadTX as u8, /* LoadTx instruction = 0x40 = */
-            // 0100_0abc
+            TXBN::TXB0 => InstructionCommand::LoadTX as u8,
             TXBN::TXB1 => InstructionCommand::LoadTX as u8 | 0x2,
             TXBN::TXB2 => InstructionCommand::LoadTX as u8 | 0x4,
         };
@@ -664,12 +666,10 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         let mut reg_offset = 0x01 as u8;
         let mut address = buffer as u8;
         let mut data_bytes = data_in.to_bytes();
-        //defmt::info!("data frame as bytes to load: {:08b}", data_bytes);
 
-        self.cs.set_low();
         /* Transaction START ------------------------------- */
+        self.cs.set_low();
         self.spi.write(&[instruction]);
-        //defmt::info!("Writing Load TX instruction, Sent (MOSI): {:08b}, Received (MISO) = High-Impedance", [instruction]);
 
         for data in data_bytes.into_iter(){
             let next_address = address + reg_offset; 
@@ -681,18 +681,12 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         self.cs.set_high();
         /* Transaction END ---------------------------------- */
 
+        // TODO: - Add target buffer to the 'self.tx_pending' method.
         self.tx_pending(true);
-        let tx_ctrl = self.read_register(MCP2515Register::TXB0CTRL, 0x00).unwrap();
-        //defmt::println!("TXB0CTRL register after load_tx: 0b{:08b}", tx_ctrl);
-
     }
 
-    /// Performs the 'Read Rx Instruction'.
+    /// Performs the 'Read Rx' Instruction.
     /// During the spi transfer, we send dont cares, since the address is auto incremented.
-    ///
-    /// ## TODO 
-    ///
-    /// 
     fn read_rx_buffer(&mut self, buffer: RXBN) -> Result<[u8; 13], SPI::Error> {
         defmt::println!("--------> Read RX buffer instruction:");
         
