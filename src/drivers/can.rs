@@ -14,7 +14,7 @@ use nrf52840_hal::gpiote::{Gpiote, GpioteInputPin};
 use nrf52840_hal::pac::nfct::framestatus::RX;
 
 use cortex_m_rt::entry;
-use defmt::Format;
+use defmt::{unwrap, Format};
 use defmt_rtt as _;
 
 use embedded_hal::*;
@@ -99,6 +99,13 @@ enum TXBN {
 pub enum RXBN {
     RXB0 = 0x60, //
     RXB1 = 0x70, //
+}
+
+pub enum ReceiveBufferMode{
+    FilterOffReceiveAny,
+    OnlyExtendedId,
+    OnlyStandardId,
+    ReceiveAny,
 }
 
 enum RXMN {
@@ -246,14 +253,14 @@ pub enum CanBitrate {
     CAN125,
 }
 
-// let settings = CanSettings::new(..).
 #[derive(Clone, Copy)]
 pub struct CanSettings {
     pub canctrl: CanControllSettings,
     pub mcp_clk: McpClock, // Clock Frequency for MCP2515.
     pub can_bitrate: CanBitrate,
-    pub interrupts: u8, /* mask for the enabled interrupt type bits
-                         *TODO: - Should I add which target TXBN buffers is active? */
+    pub interrupts: u8, 
+    /* mask for the enabled interrupt type bits
+     *TODO: - Should I add which target TXBN buffers is active? */
 }
 
 impl CanControllSettings {
@@ -406,8 +413,21 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
             .setup_configuration(initial_settings) // Setup CANCTRL register.
             .setup_bitrate() // Setup bitrate and clk freq, in registers: CNF1, CNF2, & CNF3.
             .setup_interrupt(initial_settings) // Setup interrupts in CANINTE register.
-            .tx_pending(false); // CLEAR the TXREQ bits indicating the tx buffer is not pending before writing.
-            
+            .tx_pending(false) // CLEAR the TXREQ bits indicating the tx buffer is not pending before writing.
+            .set_rxm_mode(ReceiveBufferMode::OnlyStandardId);
+
+        let dummy_id = StandardId::new(0x1).unwrap();
+        let mut frame = CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02, 0x03]).unwrap();
+       
+        let id_for_rxb1 = (StandardId::new(0x2).unwrap().as_raw() << 5);
+        defmt::info!("StandardId as raw: {:016b}", id_for_rxb1);
+
+        let filter_id_rxb0 = frame.id_raw();
+        let rx_mask = 0b1111_1111_1110_0000 as u16;
+        defmt::info!("filter id = {:016b} vs mask = {:016b}", filter_id_rxb0, rx_mask);
+        driver.filter_message_id(RXBN::RXB0, rx_mask, filter_id_rxb0);
+        driver.filter_message_id(RXBN::RXB1, rx_mask, id_for_rxb1);
+
         let received_reg = driver.read_register(MCP2515Register::TXB0CTRL, 0x00).unwrap();
         let rts_reg = driver.read_register(MCP2515Register::TXRTSCTRL, 0x00).unwrap();
         
@@ -667,49 +687,45 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
 
     }
 
+    /// Performs the 'Read Rx Instruction'.
+    /// During the spi transfer, we send dont cares, since the address is auto incremented.
+    ///
+    /// ## TODO 
+    ///
+    /// 
     fn read_rx_buffer(&mut self, buffer: RXBN) -> Result<[u8; 13], SPI::Error> {
         defmt::println!("--------> Read RX buffer instruction:");
         
         const DONT_CARE: u8 = 0x00;
         let mut rx_data: [u8; 3] = [0; 3];
         let mut rx_buffer = [0u8; 13];
-        let mut reg_offset = 0x01 as u8;
-
-        let mut address = match buffer {
-            RXBN::RXB0 => MCP2515Register::RXB0CTRL as u8,
-            RXBN::RXB1 => MCP2515Register::RXB1CTRL as u8,
-        };
 
         let mut instruction = match buffer {
             RXBN::RXB0 => InstructionCommand::ReadRxb0 as u8,
             RXBN::RXB1 => InstructionCommand::ReadRxb1 as u8,
         };
 
+        /* Start of the transaction. */
         self.cs.set_low();
-
-        // Send the read RX buffer instruction
         let mut instruction_buf = [instruction];
         self.spi.write(&[instruction]);
-        //defmt::info!("Read RX buffer instruction, Sent (MOSI): {:08b}, Received (MISO): {:08b}", [instruction], instruction_buf);
-      
         self.spi.transfer(&mut rx_buffer, &[0; 13]).ok(); // Read the 14 bytes of CAN data
-
         self.cs.set_high();
-
-        let mut frame = CanMessage::from(rx_buffer);
-        let frame_byte = frame.to_bytes();
+        /* End of transation. */
         
+        let mut frame = CanMessage::from(rx_buffer);
         //defmt::println!("Reading RX buffer (received): {:08b}", rx_buffer);
-        //defmt::println!("Reading RX buffer frame.to_bytes: {:08b}", frame_byte);
 
         Ok(rx_buffer)
     }
 
+    /// Reset the MCP2515 and its registers to its default values.
+    /// This is usually called, during startup, before configuration. 
     fn reset_instruction(&mut self) {
+        defmt::println!("Calling Reset instruction over SPI");
         self.cs.set_low();
         self.spi.write(&[InstructionCommand::Reset as u8]);
         self.cs.set_high();
-        
     }
 
     /// This would CLEAR the TXREQ bits indicating the tx buffer is not pending
@@ -717,9 +733,12 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
     /// transmit buffer is not pending transmission. Hence should be called
     /// before writing to the transmit buffer. Setting the flag to true,
     /// would flag a message buffer as being ready for transmission.
+    ///
+    /// ## TODO 
+    ///
+    /// Add which TX buffer to set as ready or pending, by adding argument.
+    /// This is important so we dont CLEAR or set something that is not ready.
     fn tx_pending(&mut self, is_pending: bool) -> &mut Self {
-        //TODO: - Add which TX buffer to set as ready, by adding argument.
-
         //defmt::info!("Logic for tx_pending:");
         const CLEAR: u8 = 0u8;
         const FILTERMASKOFF: u8 = 0b0110_0000;
@@ -732,52 +751,76 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
             self.write_register(MCP2515Register::TXB0CTRL, CLEAR);
             //self.write_register(MCP2515Register::TXB1CTRL, CLEAR);
             //self.write_register(MCP2515Register::TXB2CTRL, CLEAR);
-            //self.write_register(MCP2515Register::RXB0CTRL, CLEAR);
-            //self.write_register(MCP2515Register::RXB1CTRL, CLEAR);
+            self.write_register(MCP2515Register::RXB0CTRL, CLEAR);
+            self.write_register(MCP2515Register::RXB1CTRL, CLEAR);
             
-            self.write_register(MCP2515Register::RXB0CTRL, FILTERMASKOFF);            
-            self.write_register(MCP2515Register::RXB1CTRL, FILTERMASKOFF);
+            //self.write_register(MCP2515Register::RXB0CTRL, FILTERMASKOFF);            
+            //self.write_register(MCP2515Register::RXB1CTRL, FILTERMASKOFF);
         }else {
             //defmt::println!("is_pending transmission = true\nWriting {:08b} to TXB0CTRL", reg_bits);
             self.write_register(MCP2515Register::TXB0CTRL, bit_mask);
             //self.write_register(MCP2515Register::TXB1CTRL, reg_bits);
             //self.write_register(MCP2515Register::TXB2CTRL, reg_bits);
         }
-
         self
     }
 
-    /// This would apply and configure the Can controller settings for the
-    /// module.
+    /// This will set the RXBNCTRL.RXM bits, for setting the RX Operating Mode. 
+    ///
+    /// ## NOTE 
+    ///
+    /// RXM: Receive Buffer Operating Mode bits
+    ///         ################################################
+    ///         ## 11 = Turn mask/filters off; receive any message.
+    ///         ## 10 = Receive only valid messages with extended identifiers that meet filter criteria.
+    ///         ## 01 = Receive only valid messages with standard identifiers that meet filter criteria.
+    ///         ## 00 = Receive all valid messages using either standard or extended identifiers that meet filter criteria.
+    ///         ################################################
+    fn set_rxm_mode(&mut self, rxm: ReceiveBufferMode) -> &mut Self{
+        match (rxm){
+            ReceiveBufferMode::ReceiveAny => {
+                self.write_register(MCP2515Register::RXB0CTRL, 0b0000_0000);
+                self.write_register(MCP2515Register::RXB1CTRL, 0b0000_0000);
+            },
+            ReceiveBufferMode::FilterOffReceiveAny => {
+                self.write_register(MCP2515Register::RXB0CTRL, 0b0110_0000);
+                self.write_register(MCP2515Register::RXB1CTRL, 0b0110_0000);
+            },
+            ReceiveBufferMode::OnlyExtendedId => {
+                self.write_register(MCP2515Register::RXB0CTRL, 0b0100_0000);
+                self.write_register(MCP2515Register::RXB1CTRL, 0b0100_0000);
+            },
+            ReceiveBufferMode::OnlyStandardId => {
+                self.write_register(MCP2515Register::RXB0CTRL, 0b0010_0000);
+                self.write_register(MCP2515Register::RXB1CTRL, 0b0010_0000);
+            },
+        }
+        self
+    }
+
+    /// This would apply & configure the Can controller settings for the module.
     fn setup_configuration(&mut self, can_settings: &CanSettings) -> &mut Self {
         defmt::info!("Setting up Configuration: ");
 
-        defmt::println!("Calling Reset instruction over SPI");
         self.reset_instruction();
 
         let canstat_reg = self.read_register(MCP2515Register::CANSTAT, 0x00).unwrap();
-        let mut instruction_msg: [u8; 3] = [InstructionCommand::Read as u8, MCP2515Register::CANSTAT as u8, 0x00 as u8];
-        
-        defmt::println!("MOSI sending instruction: {:08b}", instruction_msg);         
-        defmt::println!("Read register instruction (CANSTAT), MISO returned: {:08b}", canstat_reg); 
-        
-        //self.rx_status();
-
         let canctrl_byte = self.get_canctrl_mask(can_settings.canctrl);
-        defmt::println!("CANCTRL mask: {:08b}", canctrl_byte);  
         
-
+        /* Write configuration bits to the register that needs to be setup. */
         self.write_register(MCP2515Register::CANCTRL, canctrl_byte);
-        let canctrl_bits = self.read_register(MCP2515Register::CANCTRL, 0x00).unwrap(); 
-       
         self.write_register(MCP2515Register::TXRTSCTRL, 0b0000_0011);
         self.write_register(MCP2515Register::BFPCTRL, 0b0000_0011);
-       
+     
+        /* Sanity check, reading so the configuration has written correctly */
+        let canctrl_bits = self.read_register(MCP2515Register::CANCTRL, 0x00).unwrap(); 
         let txrtscttrl_reg = self.read_register(MCP2515Register::TXRTSCTRL, 0x00).unwrap();
         let bfpctrl_reg = self.read_register(MCP2515Register::BFPCTRL, 0x00).unwrap();
 
         /* The requested mode must be varified by reading the OPMOD[2:0] bits (CANSTAT[7:5])*/
         let canstat_new = self.read_register(MCP2515Register::CANSTAT, 0x00).unwrap();
+        defmt::println!("CANSTAT after reset instruction is: {:08b}", canstat_reg);  
+        defmt::println!("CANCTRL mask prior writing: {:08b}", canctrl_byte);  
         defmt::println!("CANCTRL after setup is: {:08b}", canctrl_bits);  
         defmt::println!("CANSTAT after setup is: {:08b}", canstat_new);  
         defmt::println!("TXRTSCTRL after setup is: {:08b}", txrtscttrl_reg);  
@@ -788,9 +831,6 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
 
     ///This change the mode and set it to Normal mode for sending and receiving on the CAN bus.
     pub fn activate_canbus(&mut self){
-        //WARN: - Testing is done with 'One-Shot Mode'. 
-        //Which will attempt to transmit one time only. 
-
         const ONE_SHOT_MODE: bool = true;
         if (self.can_settings.canctrl.mode != OperationTypes::Normal){
             //let mut can_settings = CanSettings::default();
@@ -801,34 +841,32 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         }
     }
 
+    /// Transmit frame on CAN bus, by loading TXBN buffer, and write 'Request-To-Send' instruction.
+    ///
+    /// ## TODO
+    ///
+    /// Add logic for targeting TX buffers to read, that is not busy...
     fn transmit_can(&mut self, can_msg: &CanMessage){
-
-        /* "Normally, if a CAN message loses arbitration, or is destroyed by an error
-        frame, the message is retransmitted. With One-shot
-        mode enabled, a message will only attempt to transmit
-        one time, regardless of arbitration loss or error frame" */
-
         let can_frame = CanMessage::new(can_msg.id, &can_msg.data).unwrap();
-
-        //TODO: - Add TXBnCTRL configuration for TXP (Transmit Buffer Priority), during
-        // self init.
-
-        // WARN: - buffer argument is hardcoded atm, just for testing!
-        //self.tx_pending(false);
         self.load_tx_buffer(TXBN::TXB0, can_frame); // How should I handle buffer target for transmission
         self.request_to_send(TXBN::TXB0);
-        //self.read_rx_buffer(RXBN::RXB0);
     }
 
+    /// Receive CAN frame by reading the appropriate RXBN buffer.
+    ///
+    /// ## TODO
+    ///
+    /// Write logic for picking appropriate RXBN buffer to read.
+    /// Based on CANINTF, RXNCTRL.FILT bits, or through RX status instruction. 
     fn receive_can(&mut self) -> CanMessage{
         let rx_buffer = self.read_rx_buffer(RXBN::RXB0).unwrap();
-        
         let mut frame = CanMessage::from(rx_buffer);
         defmt::info!("Can bus received the Frame:");
         frame.print_frame();
         frame
     }
 
+    /// Setting up the MCP speed and bitrate of the MCP2515 module. 
     fn setup_bitrate(&mut self) -> &mut Self {
         //TODO: - Fix parsing of can_settings to set other MCP speed and can bitrates
 
@@ -843,7 +881,6 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         self.write_register(MCP2515Register::CNF1, 0x01);
         self.write_register(MCP2515Register::CNF2, 0xB1);
         //self.write_register(MCP2515Register::CNF2, 0xF1); //transmit three times?
-
         self.write_register(MCP2515Register::CNF3, 0x85);
 
         self
@@ -872,76 +909,53 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         // Debug assert here. This will be run during init.
         // If
         debug_assert!(
-            mask & filter == mask,
+            mask & filter == filter,
             "Mask will be atleast partially cancled by the filter"
         );
-        debug_assert!(filter < 1 << 11, "Filter must be an 11 bit integer");
-        debug_assert!(mask < 1 << 11, "Mask must be an 11 bit integer");
-
+        debug_assert!((filter>>5) < 1 << 11, "Filter must be an 11 bit integer");
+        debug_assert!((mask >> 5) < 1 << 11, "Mask must be an 11 bit integer");
         let ((mask_reg_high, mask_reg_low), (filter_reg_high, filter_reg_low)) = match channel {
+            // RXB0 have the associated; RXM0, RXF0, RXF1.      
             RXBN::RXB0 => (
-                (MCP2515Register::RXM0SIDH, MCP2515Register::RXM0SIDH),
-                (MCP2515Register::RXF0SIDH, MCP2515Register::RXF0SIDH),
+                (MCP2515Register::RXM0SIDH, MCP2515Register::RXM0SIDL),
+                (MCP2515Register::RXF0SIDH, MCP2515Register::RXF0SIDL),
             ),
+            // RXB1 have the associated; RXM1, RXF2, RXF3, RXF4, RXF5.
             RXBN::RXB1 => (
-                (MCP2515Register::RXM0SIDH, MCP2515Register::RXM0SIDH),
-                (MCP2515Register::RXF0SIDH, MCP2515Register::RXF0SIDH),
+                (MCP2515Register::RXM1SIDH, MCP2515Register::RXM1SIDL),
+                (MCP2515Register::RXF2SIDH, MCP2515Register::RXF2SIDL),
             ),
         };
-        self.write_register(mask_reg_high, ((mask >> 8) & 0b111) as u8);
-        self.write_register(mask_reg_low, (mask & 0b1111_1111) as u8);
-        self.write_register(filter_reg_high, ((filter >> 8) & 0b111) as u8);
-        self.write_register(filter_reg_low, (filter & 0b1111_1111) as u8);
+
+        let rxmn_sidh = ((mask >> 8) & 0b1111_1111) as u8;
+        let rxmn_sidl = (mask & 0b1110_0000) as u8;
+        let rxfn_sidh = ((filter >> 8) & 0b1111_1111) as u8; 
+        let rxfn_sidl = (filter & 0b1110_0000) as u8;
+    
+        defmt::info!("Mask and Filter:\nRXM_SIDH = {:08b}\nRXM_SIDL = {:08b}\nRXFN_SIDH = {:08b}\nRXFN_SIDL = {:08b}", 
+            rxmn_sidh, rxmn_sidl, rxfn_sidh, rxfn_sidl);
+      
+        self.write_register(mask_reg_high, rxmn_sidh);
+        self.write_register(mask_reg_low, rxmn_sidl);
+        self.write_register(filter_reg_high, rxfn_sidh);
+        self.write_register(filter_reg_low, rxfn_sidl);
    }
-  
-    fn enable_sof(&mut self) -> &mut Self{
-        if (self.can_settings.canctrl.clken == false){
-            defmt::info!("To enable SOF, you need to enable CLKEN in CANCTRL register!");
-        }else {
-            let sof_bit: u8 = 0b1000_0000;
-            let mut cnf3_sof =self.read_register(MCP2515Register::CNF3, 0x00).unwrap();
-            cnf3_sof |= (1 << 7);
-            defmt::info!("Mask for enabling SOF at CNF3 reg: {:08b}", cnf3_sof);
-            self.write_register(MCP2515Register::CNF3, cnf3_sof);
-        }
 
-        self
-    }
-  
+    /// Parsing the provided CanSettings struct, and enable interrupts. 
+    ///
+    /// ## Note
+    ///
+    /// "When a message is moved into either of the receive
+    ///    buffers, the appropriate CANINTF.RXnIF bit is set. This
+    ///    bit must be cleared by the MCU in order to allow a new
+    ///    message to be received into the buffer. This bit
+    ///    provides a positive lockout to ensure that the MCU has
+    ///    finished with the message before the MCP2515
+    ///    attempts to load a new message into the receive buffer.
+    ///    If the CANINTE.RXnIE bit is set, an interrupt will be
+    ///    generated on the INT pin to indicate that a valid
+    ///    message has been received."
     fn setup_interrupt(&mut self, can_settings: &CanSettings) -> &mut Self {
-        // The TXnIE bit in the CANINTE register need to be toggled/set to enable
-        // interrupt. CANINTE - enable
-        // CANINTF - interrupt flags
-        // CANSTAT ICOD - interrupt flag code bits.
-
-        /*When a message is moved into either of the receive
-        buffers, the appropriate CANINTF.RXnIF bit is set. This
-        bit must be cleared by the MCU in order to allow a new
-        message to be received into the buffer. This bit
-        provides a positive lockout to ensure that the MCU has
-        finished with the message before the MCP2515
-        attempts to load a new message into the receive buffer.
-        If the CANINTE.RXnIE bit is set, an interrupt will be
-        generated on the INT pin to indicate that a valid
-        message has been received. */
-
-        //NOTE::
-        // The source of a pending interrupt is indicated in the CANSTAT.ICOD reg.
-        // ----------------------------------------------------------------------
-        // 1. The INT pin will remain low until all interrupts have been reset by the
-        //    MCU.
-        //      - The CANSTAT.ICOD bits will reflect the code for the highest priority
-        //        interrupt.
-        //... Where interrupts are internally prioritized that lower ICOD value = higher
-        //... priority.
-        // ----------------------------------------------------------------------
-        // 2. Once the highest priority interrupt condition has been cleared...
-        // ...the next highest priority interrupt that is pending (if any) will be
-        // reflected... ...by the ICOD bits.
-
-        //let settings = can_settings.enable_interrupts(&[CanInte::TX2IE,
-        // CanInte::TX1IE, CanInte::TX0IE, CanInte::RX1IE, CanInte::RX0IE]);
-
         let settings = can_settings.enable_interrupts(&[
             CanInte::MERRE,
             CanInte::TX2IE,
@@ -952,16 +966,15 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         ]);
         
         self.can_settings.interrupts = settings.interrupts;
-
-        //defmt::info!("Enable interrupt mask: {:08b}", settings.interrupts);
         self.write_register(MCP2515Register::CANINTE, settings.interrupts);
         self.read_register(MCP2515Register::CANINTE, 0x00);
 
         self
     }
 
+    /// This method, would clear the CANINTF at bit_pos param. 
+    /// It send the Bit Modify instruction with mask and data bytes. 
     fn clear_interrupt_flag(&mut self, bit_pos: u8){
-        //defmt::info!("---Inside 'clear_interrupt_flag' logic---");
         let canintf = self.read_register(MCP2515Register::CANINTF, 0x00).unwrap();
         let mut mask_bytes: u8 = self.can_settings.interrupts; // enabled target interrupt bits.
         let mut data_bytes = canintf ^ (1 << bit_pos); //0bxxxx_1011 for clearing TX0IF
@@ -986,14 +999,11 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         */
     }
 
-      
+    /// Decodes the CANSTAT.ICOD bits, and map to matched InterruptFlagCode. 
     pub fn interrupt_decode(&mut self) -> Result<InterruptFlagCode, CanError> {
         let canstat = self.read_register(MCP2515Register::CANSTAT, 0x00).unwrap();
         let mut interrupt_code = (canstat & 0b0000_1110) >> 1; // clear OPMOD bits and shift right by 1. 
         //defmt::info!("Interrupt decode logic (ICOD), clear OPMOD and shift by 1 mask: {:08b}", interrupt_code);
-     
-        //let flag_code = InterruptFlagCode::try_from(interrupt_code).unwrap(); 
-        //defmt::info!("Received the Interrupt type: {:?}", flag_code); 
         
         match InterruptFlagCode::try_from(interrupt_code) {
             Ok(flag_code) => {
@@ -1005,10 +1015,15 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
                 Err(CanError::MessageErrorInterrupt)
             },
         }
-
-        //flag_code
     }
 
+    /// This just prints out, register bits related to a received error. 
+    ///
+    /// ## NOTE
+    ///
+    /// EFLG register - bits related to a specific ERROR FLAG. 
+    /// TEC - Transmit Error Count.
+    /// REC - Receive Error Count. 
     fn error_handling(&mut self){
         
         let canintf = self.read_register(MCP2515Register::CANINTF, 0x00).unwrap();
@@ -1024,7 +1039,6 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
 
         let mut tx_req: bool = false;
         let mut tx_err: bool = false;
-        //let message_err_flag: bool; 
         let mut message_lost: bool = false; 
 
         if (txbnctrl & (1 << 4) != 0) {
@@ -1037,12 +1051,6 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
             message_lost = true; 
         }
 
-        /*
-        for eflag in eflags_to_handle.iter(){
-            defmt::info!("EFLAG: {:?} received!", *eflag);
-        }
-        */
-
         defmt::info!("Error Decode Info: \nTXREQ = {:?}, TXERR = {:?}, MLOA = {:?}", tx_req, tx_err, message_lost);
         defmt::info!("TEC status: {:08b}", tec);
         defmt::info!("REC status: {:08b}", tec);
@@ -1050,9 +1058,13 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         defmt::info!("CANSTAT register bits: {:08b}", canstat);
         defmt::info!("EFLG register bits: {:08b}", errorflag_reg);
         defmt::info!("EFLG: {:?} to handle!", eflags_to_handle);
-
     }
 
+    /// Decodes the EFLG register...
+    ///
+    /// ## NOTE 
+    ///
+    /// Still under progress!
     fn eflg_decode(&mut self, eflg_bits: u8, eflags: &mut [EFLG]) -> usize{
         let mut count = 0; 
         
@@ -1067,12 +1079,19 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
         count as usize
     }
 
+    /// This would parse the received interrupt, triggered by the GPIOTE channel.
+    /// Pass the decoded interrupt from 'interrupt_decode()' and handle it.
+    /// E.g., clear neccessary regs such as clearing the appropriate CANINTF bits.
+    ///
+    /// ## NOTE
+    ///
+    /// This is still under progress... 
+    ///
+    /// ## TODO
+    ///
+    /// - Fix how different TX and RX buffers should be handled. 
+    /// - Write handle logic for: ErrorInterrupt, WakeUpInterrupt, TXB1, TXB2. 
     pub fn handle_interrupt(&mut self, received_interrupt: InterruptFlagCode) {
-        // Pass the decoded interrupt from 'interrupt_decode()' and handle it.
-        // E.g., clear neccessary regs such as clearing the appropriate CANINTF bits.
-        //defmt::println!("---Inside 'handle_interrupt' logic---");
-        //defmt::info!("Handle Pending Interrupt: {:?}", received_interrupt);
-        
         let canintf = self.read_register(MCP2515Register::CANINTF, 0x00).unwrap();
 
         match received_interrupt {
@@ -1080,7 +1099,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
                 if (canintf & (1 << 7) != 0) {
                     defmt::info!("Message Error Interrupt occured (MERRE)!");
                     defmt::println!("CANINTF register bits: {:08b}", canintf);
-                    //self.clear_interrupt_flag(7);
+                    self.clear_interrupt_flag(7);
                     let all_handled = self.interrupt_is_cleared();
                     if (all_handled == false){
                         self.error_handling();
@@ -1107,11 +1126,16 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
                 defmt::println!("RXB0 received a message!");
                 //TODO: FIX a try_from logic to map CANSTAT register as u8 to RXB0 /RXB1. 
                 
-                //if (canintf & (1 << 0) != 0) {}
-               
+                let rxb0_ctrl = self.read_register(MCP2515Register::RXB0CTRL, 0x00).unwrap();
+                defmt::info!("Filter bit hits of RXB0CTRL: {:08b}", rxb0_ctrl); 
                 let mut frame = self.receive().unwrap();
                 frame.data[0] = 0x4;
                 frame.data[1] = 0x4;
+                
+                let rxb1_accept_id = StandardId::new(0x2).unwrap();
+                let id_rxb1 = Id::Standard(rxb1_accept_id);
+                frame.id = id_rxb1; 
+                
                 //let received_byte_frame = self.read_rx_buffer(RXBN::RXB0).unwrap();
                 //defmt::info!("Received byte frame: {:08b}", received_byte_frame);
                 self.clear_interrupt_flag(0);
@@ -1122,15 +1146,30 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> CanDriver
                 defmt::println!("RXB1 received a message!");
                 //let received_byte_frame = self.read_rx_buffer(RXBN::RXB1).unwrap();
                 //defmt::info!("Received byte frame: {:08b}", received_byte_frame); 
+                let rxb1_ctrl = self.read_register(MCP2515Register::RXB1CTRL, 0x00).unwrap();
+                defmt::info!("Filter bit hits of RXB1CTRL: {:08b}", rxb1_ctrl);
                 self.clear_interrupt_flag(1);
-                let mut frame = self.receive().unwrap();
-                self.transmit(&frame);
+                
+                //let mut frame = self.receive().unwrap();
+             
+                let rx_buffer = self.read_rx_buffer(RXBN::RXB1).unwrap();
+                let mut frame = CanMessage::from(rx_buffer);
+                defmt::info!("Can bus received the Frame:");
+                frame.print_frame();
 
+                // This modify the received frame, and change ID that is OK against the RXB1
+                // acceptans filter...
+                let rxb0_accept_id = StandardId::new(0x1).unwrap();
+                let id_rxb0 = Id::Standard(rxb0_accept_id);
+                frame.id = id_rxb0;
+
+                self.transmit(&frame);
             },
         }
-        //Ok(())
     }
 
+    /// This would check if all interrupt (interrupt flags) has been handled. 
+    /// Will return true, if all has been handled, else false. 
     pub fn interrupt_is_cleared(&mut self) -> bool {
         const ZERO: u8 = 0u8;
         let canintf = self.read_register(MCP2515Register::CANINTF, 0x00).unwrap();

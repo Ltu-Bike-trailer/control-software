@@ -79,6 +79,7 @@ impl CanMessage {
         return Some(can_msg);
     }
 
+    /// Converts the SIDH + SIDL of 11 bits to 16 bits.
     pub fn id_raw(&mut self) -> u16 {
         let mut raw_id: u16;        
         if let embedded_can::Id::Standard(id) = self.id {
@@ -86,11 +87,21 @@ impl CanMessage {
         } else {
             raw_id = 0;
         }
-        raw_id
+
+        //TODO: - Replace with:
+        let full_standardid_as_u16 = raw_id << 5;
+
+        let sidh = (raw_id >> 3) as u8;  // Most significant byte
+        let sidl = (raw_id as u8 & 0x07) << 5;  // Least significant byte, 0x07 = 00000_0111
+        let combined = ((sidh as u16) << 8) | (sidl as u16);
+        //defmt::info!("sidh: {:08b}, sidl: {:08b}, 11bit ID: {:016b}", sidh, sidl, combined);
+        //defmt::info!("full_standardid_as_u16: {:016b}", full_standardid_as_u16);
+        full_standardid_as_u16
     }
 
+
     pub fn print_frame(&mut self){
-        let id = self.id_raw();
+        let id = self.id_raw() >> 5;
         let dlc = self.dlc;
         let data = self.data();
         defmt::info!("Id({:x}), DLC({:x}), Data({:08b})", id, dlc, data);
@@ -152,8 +163,8 @@ impl From<[u8;13]> for CanMessage{
         let mut id_bytes: [u8; 2]; 
         let mut raw_id: u16 = 0u16;
         
-        let slice_sidh = byte_data[0] as u16;
-        let slice_sidl = (byte_data[1] & 0xE0) as u16; // 
+        let slice_sidh = byte_data[0] as u16; //0000_0000_xxxx_xxxx
+        let slice_sidl = (byte_data[1] & 0xE0) as u16; // 0xE0 = 11100000, as u16 0000_0000_1110_0000 
         let dlc = byte_data[4];
         
         let data_start = 5 as usize;
@@ -167,7 +178,11 @@ impl From<[u8;13]> for CanMessage{
         //data[0..].copy_from_slice(&byte_data[5..]);
         // Shift MSB u16 SIDH part and OR the LSB u16 SIDL part 
         raw_id = ((slice_sidh << 3) + (slice_sidl >> 5));
-        
+       
+        let sidh = (raw_id >> 3) as u8;  // Most significant byte
+        let sidl = (raw_id as u8 & 0x07) << 5;  // Least significant byte, 0x07 = 00000_0111
+        //let combined = (((slice_sidh) << 8) | (slice_sidl)) >> 5; // 
+
         //defmt::println!("byte_data[0] = SIDH reg: {:08b}", byte_data[0]);
         //defmt::println!("byte_data[1] = SIDL reg: {:08b}", byte_data[1]);
         //defmt::println!("CanMessage::from, lower_bits: {:016b}", slice_sidl);
