@@ -58,6 +58,9 @@ pub enum ControllerError<Error: Debug, ConversionError: Debug> {
     ///
     /// This is thrown when a value is to large to fit in half the size.
     ValueToLarge,
+
+    /// Multiplication resulted in overflow
+    MultiplicationOverflow
 }
 
 /// This assumes that we have a i32 as data.
@@ -303,7 +306,7 @@ where
 
         self.integral = self.integral.max(threshold_min).min(threshold_max);
 
-        let i = self.integral * ki;
+        let i = self.integral.mul(ki);
 
         // Compute the rate of change between previous time-step and this time-step.
         let d = kd * time_scale * (error - self.previous) / ts;
