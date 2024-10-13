@@ -277,6 +277,7 @@ mod app {
             let target = cx.shared.current_target.lock(|target| *target);
 
             controller.follow([target]);
+            defmt::info!("Computing actuation");
             let new_duty = match controller.actuate(time - prev) {
                 Ok(val) => val.actuation,
                 Err(_e) => continue,

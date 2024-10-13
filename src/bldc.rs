@@ -23,7 +23,7 @@ impl<T: Instance> FloatDuty for Pwm<T> {
 /// Denotes the pattern in which we drive the BLDC motors on the ESC.
 #[derive(Default)]
 pub struct DrivePattern {
-    pattern: [u8; 7],
+    pattern: [u8; 8],
     idx: usize,
 }
 
@@ -34,15 +34,32 @@ impl DrivePattern {
         Self {
             idx: 0,
             pattern: [
-                0b01_00_10, // Initally assume that we are in 100 state. This allows initial
+                0b00_00_00, // Initally assume that we are in 100 state. This allows initial
                 // driving of the motor. it might cost a litle extra current but this should be
                 // fine.
+
+                // Matlab version :/
+                /*
                 0b00_10_01, // 0b001
                 0b10_01_00, // 0b010
                 0b10_00_01, // 0b011
                 0b01_00_10, // 0b100
                 0b01_10_00, // 0b101
                 0b00_01_10, // 0b110
+                */
+                // micro chip version
+                /*
+                0b01_00_10, // 0b001
+                0b00_10_01, // 0b010
+                0b01_10_00, // 0b011
+                0b10_01_00, // 0b100
+                0b00_01_10, // 0b101
+                0b10_00_01, // 0b110
+                */
+                // micro chip version ccw
+                0b10_00_01, 0b00_01_10, 0b10_01_00, 0b01_10_00, 0b00_10_01, 0b01_00_10,
+                // Needed because the hal effects are funky
+                0b00_00_00, // 0b111
             ],
         }
     }
@@ -84,13 +101,14 @@ impl DrivePattern {
     }
 
     /// Returns the current switching pattern.
-    pub fn get(&mut self) -> (bool, bool, bool) {
-        debug_assert!(self.idx <= 0b110);
+    pub fn get(&mut self) -> ((bool, bool), (bool, bool), (bool, bool)) {
+        //debug_assert!(self.idx <= 0b110);
         let pattern = self.pattern[self.idx];
+        defmt::info!("Using pattern {:#b}", pattern);
         (
-            pattern & 0b100 != 0,
-            pattern & 0b10 != 0,
-            pattern & 0b1 != 0,
+            (pattern & 0b100000 != 0, pattern & 0b10000 != 0),
+            (pattern & 0b1000 != 0, pattern & 0b100 != 0),
+            (pattern & 0b10 != 0, pattern & 0b1 != 0),
         )
     }
 }
