@@ -10,7 +10,7 @@ defmt = { version = "0.3", features = ["encoding-rzcobs"] }
 defmt-rtt = { version = "0.4" }
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 rtic = { version = "2.1.1", features = ["thumbv7-backend"] }
-nrf52840-hal = { git = "https://github.com/nrf-rs/nrf-hal/", features = ["rt","embedded-hal-02"],default-features = false }
+nrf52840-hal = { git = "https://github.com/nrf-rs/nrf-hal/", features = ["rt","embedded-hal-02"], default-features = false }
 rtic-monotonics = { version = "2.0.2", features = [
     "cortex-m-systick",
     "nrf52840",
@@ -23,7 +23,7 @@ embedded-hal = "1.0.0"
 
 ## Defines a double ended queue implementation of arrays instead of vectors
 arraydeque = { version = "0.5.1", default-features = false }
-hx711 = "0.6.0"
+hx711_spi = "0.5.0"
 
 # cargo build/run
 [profile.dev]
