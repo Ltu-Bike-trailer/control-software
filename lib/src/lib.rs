@@ -35,7 +35,8 @@
     // I see the benefits of this but it is not worth it for our use case.
     clippy::from_over_into
 )]
-#![cfg_attr(not(feature = "std"), no_std)]
+#![feature(f16)]
+#![cfg_attr(not(feature = "std"), no_std, allow(internal_features))]
 pub mod constants;
 pub mod gain_scheduled;
 pub mod pid;

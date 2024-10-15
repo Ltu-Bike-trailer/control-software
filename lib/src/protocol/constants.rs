@@ -24,6 +24,10 @@ pub enum Message {
     SensorLFront = 12,
     /// Represents a write of bed loadcell value.
     SensorLBed = 13,
+    /// Represents a write of left current sensors.
+    SensorCurrentLeft = 14,
+    /// Represents a write of Right current sensors.
+    SensorCurrentRight = 15,
 
     /// Represents a status message from the left motor.
     ///
