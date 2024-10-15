@@ -10,9 +10,7 @@ defmt = { version = "0.3", features = ["encoding-rzcobs"] }
 defmt-rtt = { version = "0.4" }
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 rtic = { version = "2.1.1", features = ["thumbv7-backend"] }
-nrf52840-hal = { git = "https://github.com/nrf-rs/nrf-hal/", features = [
-    "rt",
-], default-features = false }
+nrf52840-hal = { git = "ssh://git@github.com/Ltu-Bike-trailer/nrf-hal.git", features = ["rt"],default-features = false }
 rtic-monotonics = { version = "2.0.2", features = [
     "cortex-m-systick",
     "nrf52840",
@@ -29,7 +27,7 @@ esc = { package = "bsp", path = "../ESC/bsp", optional = true, default-features 
 
 ## Defines a double ended queue implementation of arrays instead of vectors
 arraydeque = { version = "0.5.1", default-features = false }
-cmsis_dsp = { version = "0.1.0", path = "../cmsis_dsp.rs" }
+# cmsis_dsp = { version = "0.1.0", path = "../cmsis_dsp.rs" }
 foc = "0.3.0"
 fixed = "1.24.0"
 
@@ -76,3 +74,6 @@ default = ["esc"]
 # defmt-rtt = { git = "https://github.com/knurling-rs/defmt", rev = "use defmt version supported by probe-rs (see changelog)" }
 # defmt-test = { git = "https://github.com/knurling-rs/defmt", rev = "use defmt version supported by probe-rs (see changelog)" }
 # panic-probe = { git = "https://github.com/knurling-rs/defmt", rev = "use defmt version supported by probe-rs (see changelog)" }
+
+[net]
+git-fetch-with-cli = true
