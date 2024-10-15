@@ -29,6 +29,9 @@ esc = { package = "bsp", path = "../ESC/bsp", optional = true, default-features 
 
 ## Defines a double ended queue implementation of arrays instead of vectors
 arraydeque = { version = "0.5.1", default-features = false }
+cmsis_dsp = { version = "0.1.0", path = "../cmsis_dsp.rs" }
+foc = "0.3.0"
+fixed = "1.24.0"
 
 # cargo build/run
 [profile.dev]

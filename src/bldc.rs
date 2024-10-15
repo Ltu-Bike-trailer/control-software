@@ -111,4 +111,10 @@ impl DrivePattern {
             (pattern & 0b10 != 0, pattern & 0b1 != 0),
         )
     }
+
+    #[allow(clippy::cast_possible_truncation)]
+    /// Returns the current state.
+    pub fn get_state(&self) -> u8 {
+        self.idx as u8
+    }
 }

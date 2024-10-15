@@ -22,13 +22,11 @@ nrf_rtc0_monotonic!(Mono);
 )]
 mod app {
 
-    use controller::{
-        bldc::{DrivePattern, FloatDuty},
-        cart::constants::CURRENT_SAMPLE_RATE,
-    };
+    use controller::bldc::{DrivePattern, FloatDuty};
     use cortex_m::asm;
     //use embedded_hal::digital::InputPin;
     use esc::{self, events::GpioEvents, PinConfig};
+    use foc::{pwm::SpaceVector, Foc};
     use lib::protocol;
     use nrf52840_hal::{
         gpio::{Input, Pin, PullUp},
@@ -37,6 +35,7 @@ mod app {
         time::U32Ext,
     };
     use rtic_monotonics::Monotonic;
+    use rtic_sync::make_channel;
 
     use crate::Mono;
 
@@ -47,9 +46,6 @@ mod app {
         drive_pattern: DrivePattern,
         sender: protocol::sender::Sender<10>,
         duty: f32,
-        phase1: Pwm<PWM0>,
-        phase2: Pwm<PWM1>,
-        phase3: Pwm<PWM2>,
         velocity: f32,
     }
 
@@ -59,7 +55,16 @@ mod app {
         // TODO: Add resources
         events: esc::events::Manager,
         current_sense: esc::CurrentManager,
+
+        current_sender: rtic_sync::channel::Sender<'static, [f32; 3], 100>,
+        current_receiver: rtic_sync::channel::Receiver<'static, [f32; 3], 100>,
         hal_pins: [Pin<Input<PullUp>>; 3],
+        foc_sender: rtic_sync::channel::Sender<'static, u8, 100>,
+        foc_receiver: rtic_sync::channel::Receiver<'static, u8, 100>,
+        foc_manager: Foc<SpaceVector, { 1 << 15 }>,
+        phase1: Pwm<PWM0>,
+        phase2: Pwm<PWM1>,
+        phase3: Pwm<PWM2>,
     }
 
     #[init]
@@ -70,6 +75,16 @@ mod app {
             .start_lfclk();
         Mono::start(cx.device.RTC0);
 
+        let foc_manager = foc::Foc::<SpaceVector, { 1 << 15 }>::new(
+            foc::pid::PIController::new(
+                fixed::FixedI32::from_num(10),
+                fixed::FixedI32::from_num(2),
+            ),
+            foc::pid::PIController::new(
+                fixed::FixedI32::from_num(10),
+                fixed::FixedI32::from_num(2),
+            ),
+        );
         let p0 = nrf52840_hal::gpio::p0::Parts::new(cx.device.P0);
         let p1 = nrf52840_hal::gpio::p1::Parts::new(cx.device.P1);
         let ppi = nrf52840_hal::ppi::Parts::new(cx.device.PPI);
@@ -106,19 +121,9 @@ mod app {
 
         let sender = protocol::sender::Sender::new();
         debug_assert!(Mono::now().duration_since_epoch().to_micros() != 0);
-        /*
-        if unsafe { hal_pins[0].is_high().unwrap_unchecked() } {
-            drive_pattern.set_a();
-        }
 
-        if unsafe { hal_pins[1].is_high().unwrap_unchecked() } {
-            drive_pattern.set_b();
-        }
-
-        if unsafe { hal_pins[2].is_high().unwrap_unchecked() } {
-            drive_pattern.set_c();
-        }
-        */
+        let (foc_sender, foc_receiver) = make_channel!(u8, 100);
+        let (current_sender, current_receiver) = make_channel!([f32; 3], 100);
         // Spawn the tasks.
         motor_driver::spawn().ok().unwrap();
 
@@ -128,9 +133,6 @@ mod app {
                 drive_pattern,
                 sender,
                 duty: 0.5,
-                phase1,
-                phase2,
-                phase3,
                 velocity: 0.,
             },
             Local {
@@ -138,11 +140,19 @@ mod app {
                 events,
                 current_sense,
                 hal_pins,
+                foc_receiver,
+                foc_sender,
+                foc_manager,
+                phase1,
+                phase2,
+                phase3,
+                current_receiver,
+                current_sender,
             },
         )
     }
 
-    #[task(binds=GPIOTE, local=[events,hal_pins,t:Option<u64> = None],shared = [drive_pattern,phase1,phase2,phase3,duty,velocity], priority = 5)]
+    #[task(binds=GPIOTE, local=[events,hal_pins,t:Option<u64> = None,foc_sender,state: [bool;3] = [false;3]],shared = [drive_pattern], priority = 5)]
     /// Manages gpiote interrupts.
     ///
     /// This is every pin interrupt. So hal effect feedback, can bus messages
@@ -157,44 +167,24 @@ mod app {
     ///
     /// This ensures that the motor can be started from standstill.
     fn handle_gpio(mut cx: handle_gpio::Context) {
-        let t = Mono::now();
-        let mut set_phase = false;
-        for event in cx.local.events.events() {
-            match event {
-                GpioEvents::P1HalRising => {
-                    defmt::info!("P1 hal rising");
-                    cx.shared.drive_pattern.lock(|pattern| pattern.set_a());
-                    set_phase = true;
+        cx.shared.drive_pattern.lock(|pattern| {
+            for event in cx.local.events.events() {
+                match event {
+                    GpioEvents::P1HalRising => pattern.set_a(),
+                    GpioEvents::P1HalFalling => pattern.clear_a(),
+                    GpioEvents::P2HalRising => pattern.set_b(),
+                    GpioEvents::P2HalFalling => pattern.clear_b(),
+                    GpioEvents::P3HalRising => pattern.set_c(),
+                    GpioEvents::P3HalFalling => pattern.clear_c(),
+                    GpioEvents::CAN => todo!("Handle CAN event"),
                 }
-                GpioEvents::P1HalFalling => {
-                    defmt::info!("P2 hal falling");
-                    cx.shared.drive_pattern.lock(|pattern| pattern.clear_a());
-                    set_phase = true;
-                }
-                GpioEvents::P2HalRising => {
-                    defmt::info!("P2 hal rising");
-                    cx.shared.drive_pattern.lock(|pattern| pattern.set_b());
-                    set_phase = true;
-                }
-                GpioEvents::P2HalFalling => {
-                    defmt::info!("P2 hal falling");
-                    cx.shared.drive_pattern.lock(|pattern| pattern.clear_b());
-                    set_phase = true;
-                }
-                GpioEvents::P3HalRising => {
-                    defmt::info!("P3 hal rising");
-                    cx.shared.drive_pattern.lock(|pattern| pattern.set_c());
-                    set_phase = true;
-                }
-                GpioEvents::P3HalFalling => {
-                    defmt::info!("P3 hal falling");
-                    cx.shared.drive_pattern.lock(|pattern| pattern.clear_c());
-                    set_phase = true;
-                }
-                GpioEvents::CAN => todo!("Handle CAN event"),
             }
-        }
 
+            // We are the only sender so we will always acquire the lock.
+            let _ = cx.local.foc_sender.try_send(pattern.get_state());
+        });
+
+        /*
         if !set_phase {
             return;
         }
@@ -278,9 +268,10 @@ mod app {
             phase2.set_duty(duty);
             phase3.set_duty(duty);
         });
+        */
     }
 
-    #[task(shared = [drive_pattern,duty,phase1,phase2,phase3],priority = 2)]
+    #[task(local = [foc_manager,phase1,phase2,phase3,foc_receiver,current_receiver,current_sense],priority = 2)]
     /// Drives the phases of the motor.
     ///
     /// This is done by disabling the high/low side of each phase with respect
@@ -291,10 +282,90 @@ mod app {
     /// This ensures that the velocity can be set without dependance on the rate
     /// of interrupts.
     async fn motor_driver(cx: motor_driver::Context) {
-        let (mut drive_pattern, mut duty) = (cx.shared.drive_pattern, cx.shared.duty);
+        let foc = cx.local.foc_manager;
+        let (p1, p2, p3) = (cx.local.phase1, cx.local.phase2, cx.local.phase3);
+        let mut prev_time = Mono::now();
+        let mut angle: fixed::types::I16F16 = fixed::types::I16F16::default();
+        loop {
+            if let Ok(val) = cx.local.foc_receiver.try_recv() {
+                defmt::info!("SPINNING {}", val);
+                let intermediate: fixed::types::I16F16 =
+                    fixed::types::I16F16::from_num(32. * 360. / core::f32::consts::PI);
+                angle = match val {
+                    0b110 => fixed::types::I16F16::from_num(32. * 180. / core::f32::consts::PI),
+                    0b100 => fixed::types::I16F16::from_num(96. * 180. / core::f32::consts::PI),
+                    0b101 => fixed::types::I16F16::from_num(160. * 180. / core::f32::consts::PI),
+                    0b001 => fixed::types::I16F16::from_num(224. * 180. / core::f32::consts::PI),
+                    0b011 => fixed::types::I16F16::from_num(288. * 180. / core::f32::consts::PI),
+                    0b010 => fixed::types::I16F16::from_num(352. * 180. / core::f32::consts::PI),
+                    _val => fixed::types::I16F16::from_num(0),
+                };
+            }
+            let current = match cx.local.current_sense.sample() {
+                Ok([c1, c2, c3]) => [
+                    fixed::types::I16F16::from_num(c1),
+                    fixed::types::I16F16::from_num(c2),
+                ],
+                Err(_) => continue,
+            };
+            let time = Mono::now();
 
-        let (((p1h, p1l), (p2h, p2l), (p3h, p3l)), duty) =
-            (&mut drive_pattern, &mut duty).lock(|pattern, duty| (pattern.get(), *duty));
+            let [pa, pb, pc] = foc.update(
+                current,
+                angle,
+                fixed::types::I16F16::from_num(1),
+                fixed::types::I16F16::from_num(
+                    unsafe { time.checked_duration_since(prev_time).unwrap_unchecked() }
+                        .to_micros(),
+                ),
+            );
+            defmt::info!("Applying {},{},{}", pa, pb, pc);
+            prev_time = time;
+
+            const AVG: u16 = u16::MAX;
+            if pa > AVG {
+                p1.set_duty_on(pwm::Channel::C1, 0);
+                p1.set_duty_on(pwm::Channel::C0, pa - AVG);
+                p1.enable_channel(pwm::Channel::C0);
+                p1.disable_channel(pwm::Channel::C1);
+            } else {
+                p1.set_duty_on(pwm::Channel::C0, 0);
+                p1.set_duty_on(pwm::Channel::C1, AVG - pa);
+                p1.enable_channel(pwm::Channel::C1);
+                p1.disable_channel(pwm::Channel::C0);
+            }
+            p1.enable();
+
+            if pb > AVG {
+                p2.set_duty_on(pwm::Channel::C1, 0);
+                p2.set_duty_on(pwm::Channel::C0, pb - AVG);
+                p2.enable_channel(pwm::Channel::C0);
+                p2.disable_channel(pwm::Channel::C1);
+            } else {
+                p2.set_duty_on(pwm::Channel::C0, 0);
+                p2.set_duty_on(pwm::Channel::C1, AVG - pb);
+                p2.enable_channel(pwm::Channel::C1);
+                p2.disable_channel(pwm::Channel::C0);
+            }
+            p2.enable();
+
+            if pc > AVG {
+                p3.set_duty_on(pwm::Channel::C1, 0);
+                p3.set_duty_on(pwm::Channel::C0, pc - AVG);
+                p3.enable_channel(pwm::Channel::C0);
+                p3.disable_channel(pwm::Channel::C1);
+            } else {
+                p3.set_duty_on(pwm::Channel::C0, 0);
+                p3.set_duty_on(pwm::Channel::C1, AVG - pc);
+                p3.enable_channel(pwm::Channel::C1);
+                p3.disable_channel(pwm::Channel::C0);
+            }
+            p3.enable();
+        }
+        /*
+
+
+
         defmt::info!(
             "Pattern Ah {}, Al {}, Bh {}, Bl {}, Ch {}, Cl {}",
             p1h,
@@ -304,6 +375,7 @@ mod app {
             p3h,
             p3l
         );
+
         assert!(p2h != p2l || !p2h);
         (cx.shared.phase1, cx.shared.phase2, cx.shared.phase3).lock(|phase1, phase2, phase3| {
             match (p1h, p1l) {
@@ -365,44 +437,15 @@ mod app {
             phase1.set_duty(duty);
             phase2.set_duty(duty);
             phase3.set_duty(duty);
-        });
+        });*/
     }
 
     /// When ever the system is not running we should sample the current.
-    #[idle(local=[current_sense],shared = [sender])]
-    fn idle(mut cx: idle::Context) -> ! {
+    #[idle(shared = [sender])]
+    fn idle(cx: idle::Context) -> ! {
         defmt::info!("idle");
-
-        let mut count = 0;
-        let (mut avg_p1, mut avg_p2, mut avg_p3) = (0., 0., 0.);
-        let mut prev = Mono::now();
         loop {
-            let t = Mono::now();
-            let [p1, p2, p3] = match cx.local.current_sense.sample() {
-                Ok(val) => val,
-                Err(_) => continue,
-            };
-
-            avg_p1 += p1;
-            avg_p2 += p2;
-            avg_p3 += p3;
-            count += 1;
-
-            // Send the average over the latest measurement period.
-            if t.checked_duration_since(prev)
-                .is_some_and(|diff| diff.to_micros() > CURRENT_SAMPLE_RATE)
-            {
-                prev = t;
-                let avg = [
-                    avg_p1 / count as f32,
-                    avg_p2 / count as f32,
-                    avg_p3 / count as f32,
-                ];
-                //defmt::info!("Sending current average {:?}", avg);
-                let _ = cx.shared.sender.lock(|sender| {
-                    sender.set_current_sense_left((t.duration_since_epoch().to_millis(), avg))
-                });
-            }
+            asm::wfi();
         }
     }
 }
