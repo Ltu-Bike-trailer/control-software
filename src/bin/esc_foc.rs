@@ -103,6 +103,7 @@ mod app {
             .set_output_pin(pwm::Channel::C1, p1.low_side)
             .set_period(100u32.khz().into())
             .set_duty(0.1);
+        phase1.center_align();
 
         let phase2 = Pwm::new(cx.device.PWM1);
         phase2
@@ -110,12 +111,15 @@ mod app {
             .set_output_pin(pwm::Channel::C1, p2.low_side)
             .set_period(1000u32.khz().into())
             .set_duty(0.1);
+        phase2.center_align();
         let phase3 = Pwm::new(cx.device.PWM2);
         phase3
             .set_output_pin(pwm::Channel::C0, p3.high_side)
             .set_output_pin(pwm::Channel::C1, p3.low_side)
             .set_period(100u32.khz().into())
             .set_duty(0.1);
+        phase3.center_align();
+
         //  The order that we should drive the phases.
         let drive_pattern = DrivePattern::new();
 
