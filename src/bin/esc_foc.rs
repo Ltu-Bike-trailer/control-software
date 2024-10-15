@@ -183,92 +183,6 @@ mod app {
             // We are the only sender so we will always acquire the lock.
             let _ = cx.local.foc_sender.try_send(pattern.get_state());
         });
-
-        /*
-        if !set_phase {
-            return;
-        }
-
-        // Trigger the phases inline since we want to run it as fast as possible.
-        //
-        // Doing it this way ensures that we never miss a state, given that the app i
-        // schedulable.
-        defmt::info!("Got hal effect interrupt!");
-        let (mut drive_pattern, mut duty) = (cx.shared.drive_pattern, cx.shared.duty);
-
-        let (((p1h, p1l), (p2h, p2l), (p3h, p3l)), duty) =
-            (&mut drive_pattern, &mut duty).lock(|pattern, duty| (pattern.get(), *duty));
-        defmt::info!(
-            "Pattern Ah {}, Al {}, Bh {}, Bl {}, Ch {}, Cl {}",
-            p1h,
-            p1l,
-            p2h,
-            p2l,
-            p3h,
-            p3l
-        );
-        debug_assert!(p1h != p1l || !p1h);
-        debug_assert!(p2h != p2l || !p2h);
-        debug_assert!(p3h != p3l || !p3h);
-        (cx.shared.phase1, cx.shared.phase2, cx.shared.phase3).lock(|phase1, phase2, phase3| {
-            match (p1h, p1l) {
-                (true, false) => {
-                    phase1.disable_channel(pwm::Channel::C1);
-                    asm::nop();
-                    phase1.enable_channel(pwm::Channel::C0);
-                }
-                (false, true) => {
-                    phase1.disable_channel(pwm::Channel::C0);
-                    asm::nop();
-                    phase1.enable_channel(pwm::Channel::C1);
-                }
-                (false, false) => {
-                    phase1.disable_channel(pwm::Channel::C0);
-                    asm::nop();
-                    phase1.disable_channel(pwm::Channel::C1);
-                }
-                _ => panic!("Tried to kill the system on phase 1 :("),
-            };
-
-            match (p2h, p2l) {
-                (true, false) => {
-                    phase2.disable_channel(pwm::Channel::C1);
-                    asm::nop();
-                    phase2.enable_channel(pwm::Channel::C0);
-                }
-                (false, true) => {
-                    phase2.disable_channel(pwm::Channel::C0);
-                    asm::nop();
-                    phase2.enable_channel(pwm::Channel::C1);
-                }
-                (false, false) => {
-                    phase2.disable_channel(pwm::Channel::C0);
-                    asm::nop();
-                    phase2.disable_channel(pwm::Channel::C1);
-                }
-                _ => panic!("Tried to kill the system on phase 2 :("),
-            };
-
-            match (p3h, p3l) {
-                (true, false) => {
-                    phase3.disable_channel(pwm::Channel::C1);
-                    phase3.enable_channel(pwm::Channel::C0);
-                }
-                (false, true) => {
-                    phase3.disable_channel(pwm::Channel::C0);
-                    phase3.enable_channel(pwm::Channel::C1);
-                }
-                (false, false) => {
-                    phase3.disable_channel(pwm::Channel::C0);
-                    phase3.disable_channel(pwm::Channel::C1);
-                }
-                _ => panic!("Tried to kill the system on phase 3 :("),
-            };
-            phase1.set_duty(duty);
-            phase2.set_duty(duty);
-            phase3.set_duty(duty);
-        });
-        */
     }
 
     #[task(local = [foc_manager,phase1,phase2,phase3,foc_receiver,current_receiver,current_sense],priority = 2)]
@@ -298,11 +212,20 @@ mod app {
                     0b001 => fixed::types::I16F16::from_num(224. * 180. / core::f32::consts::PI),
                     0b011 => fixed::types::I16F16::from_num(288. * 180. / core::f32::consts::PI),
                     0b010 => fixed::types::I16F16::from_num(352. * 180. / core::f32::consts::PI),
-                    _val => fixed::types::I16F16::from_num(0),
+                    _val => fixed::types::I16F16::max(
+                        fixed::types::I16F16::TAU,
+                        angle + fixed::types::I16F16::from_num(0.1),
+                    ),
                 };
+            } else {
+                angle = fixed::types::I16F16::max(
+                    fixed::types::I16F16::TAU,
+                    angle + fixed::types::I16F16::from_num(0.1),
+                );
             }
-            let current = match cx.local.current_sense.sample() {
-                Ok([c1, c2, c3]) => [
+            // Make this async to allow other tasks to urn in the mean time.
+            let current = match cx.local.current_sense.sample().await {
+                Ok([c1, c2, _c3]) => [
                     fixed::types::I16F16::from_num(c1),
                     fixed::types::I16F16::from_num(c2),
                 ],
@@ -313,131 +236,54 @@ mod app {
             let [pa, pb, pc] = foc.update(
                 current,
                 angle,
-                fixed::types::I16F16::from_num(1),
+                // The power target in amperes.
+                fixed::types::I16F16::from_num(3),
                 fixed::types::I16F16::from_num(
                     unsafe { time.checked_duration_since(prev_time).unwrap_unchecked() }
                         .to_micros(),
                 ),
             );
-            defmt::info!("Applying {},{},{}", pa, pb, pc);
             prev_time = time;
 
             const AVG: u16 = u16::MAX;
             if pa > AVG {
-                p1.set_duty_on(pwm::Channel::C1, 0);
-                p1.set_duty_on(pwm::Channel::C0, pa - AVG);
                 p1.enable_channel(pwm::Channel::C0);
                 p1.disable_channel(pwm::Channel::C1);
+                let pa = pa - AVG;
             } else {
-                p1.set_duty_on(pwm::Channel::C0, 0);
-                p1.set_duty_on(pwm::Channel::C1, AVG - pa);
+                let pa = AVG - pa;
                 p1.enable_channel(pwm::Channel::C1);
                 p1.disable_channel(pwm::Channel::C0);
             }
-            p1.enable();
 
             if pb > AVG {
-                p2.set_duty_on(pwm::Channel::C1, 0);
-                p2.set_duty_on(pwm::Channel::C0, pb - AVG);
                 p2.enable_channel(pwm::Channel::C0);
                 p2.disable_channel(pwm::Channel::C1);
+                let pb = pb - AVG;
             } else {
-                p2.set_duty_on(pwm::Channel::C0, 0);
-                p2.set_duty_on(pwm::Channel::C1, AVG - pb);
+                let pb = AVG - pb;
                 p2.enable_channel(pwm::Channel::C1);
                 p2.disable_channel(pwm::Channel::C0);
             }
-            p2.enable();
 
             if pc > AVG {
-                p3.set_duty_on(pwm::Channel::C1, 0);
-                p3.set_duty_on(pwm::Channel::C0, pc - AVG);
                 p3.enable_channel(pwm::Channel::C0);
                 p3.disable_channel(pwm::Channel::C1);
+                let pc = pc - AVG;
             } else {
-                p3.set_duty_on(pwm::Channel::C0, 0);
-                p3.set_duty_on(pwm::Channel::C1, AVG - pc);
+                let pc = AVG - pc;
                 p3.enable_channel(pwm::Channel::C1);
                 p3.disable_channel(pwm::Channel::C0);
             }
+
+            // Apply changes.
+            p1.enable();
+            p1.set_duty(pa as f32 / AVG as f32);
+            p2.enable();
+            p2.set_duty(pb as f32 / AVG as f32);
             p3.enable();
+            p3.set_duty(pc as f32 / AVG as f32);
         }
-        /*
-
-
-
-        defmt::info!(
-            "Pattern Ah {}, Al {}, Bh {}, Bl {}, Ch {}, Cl {}",
-            p1h,
-            p1l,
-            p2h,
-            p2l,
-            p3h,
-            p3l
-        );
-
-        assert!(p2h != p2l || !p2h);
-        (cx.shared.phase1, cx.shared.phase2, cx.shared.phase3).lock(|phase1, phase2, phase3| {
-            match (p1h, p1l) {
-                (true, false) => {
-                    phase1.disable_channel(pwm::Channel::C1);
-                    asm::nop();
-                    phase1.enable_channel(pwm::Channel::C0);
-                }
-                (false, true) => {
-                    phase1.disable_channel(pwm::Channel::C0);
-                    asm::nop();
-                    phase1.enable_channel(pwm::Channel::C1);
-                }
-                (false, false) => {
-                    phase1.disable_channel(pwm::Channel::C0);
-                    asm::nop();
-                    phase1.disable_channel(pwm::Channel::C1);
-                }
-                _ => panic!("Tried to kill the system on phase 1 :("),
-            };
-
-            match (p2h, p2l) {
-                (true, false) => {
-                    phase2.disable_channel(pwm::Channel::C1);
-                    asm::nop();
-                    phase2.enable_channel(pwm::Channel::C0);
-                }
-                (false, true) => {
-                    phase2.disable_channel(pwm::Channel::C0);
-                    asm::nop();
-                    phase2.enable_channel(pwm::Channel::C1);
-                }
-                (false, false) => {
-                    phase2.disable_channel(pwm::Channel::C0);
-                    asm::nop();
-                    phase2.disable_channel(pwm::Channel::C1);
-                }
-                _ => panic!("Tried to kill the system on phase 2 :("),
-            };
-
-            match (p3h, p3l) {
-                (true, false) => {
-                    phase3.disable_channel(pwm::Channel::C1);
-                    asm::nop();
-                    phase3.enable_channel(pwm::Channel::C0);
-                }
-                (false, true) => {
-                    phase3.disable_channel(pwm::Channel::C0);
-                    asm::nop();
-                    phase3.enable_channel(pwm::Channel::C1);
-                }
-                (false, false) => {
-                    phase3.disable_channel(pwm::Channel::C0);
-                    asm::nop();
-                    phase3.disable_channel(pwm::Channel::C1);
-                }
-                _ => panic!("Tried to kill the system on phase 3 :("),
-            };
-            phase1.set_duty(duty);
-            phase2.set_duty(duty);
-            phase3.set_duty(duty);
-        });*/
     }
 
     /// When ever the system is not running we should sample the current.
