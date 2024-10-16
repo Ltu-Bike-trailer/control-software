@@ -2,7 +2,11 @@
 
 #![no_main]
 #![no_std]
+<<<<<<< HEAD
 #![feature(type_alias_impl_trait,generic_arg_infer)]
+=======
+#![feature(type_alias_impl_trait)]
+>>>>>>> b73c1a0 (works after swapin a pin)
 #![deny(clippy::all)]
 #![deny(warnings)]
 #![allow(unused_imports)]
@@ -10,17 +14,31 @@
 use controller as _;
 use rtic_monotonics::nrf_rtc0_monotonic; // global logger + panicking-behavior + memory layout
 nrf_rtc0_monotonic!(Mono);
+<<<<<<< HEAD
 use controller::drivers::MA732::*;
+=======
+>>>>>>> b73c1a0 (works after swapin a pin)
 
 #[rtic::app(
     device = nrf52840_hal::pac,
     dispatchers = [RTC1]
 )]
+<<<<<<< HEAD
 
 
 mod app {
     use controller::drivers::{MA732::Driver, MA732::Register};
     use nrf52840_hal::{gpio::{p0::Parts, Floating, Input, Level, Output, Pin, PushPull}, pac::SPI1, spi::{self, Frequency, Spi}, Clocks};
+=======
+mod app {
+    use cortex_m::asm::delay;
+    use embedded_hal::{digital::{InputPin, OutputPin}, spi::SpiBus};
+    use nrf52840_hal::{self as hal, self, gpio::{p0::Parts, Floating, Input, Level, Output, Pin, PushPull}, spi::{self, Frequency, Spi}};
+
+    use nrf52840_hal::pac::{p0, SPI1};
+    use prelude::{ExtU64, Monotonic};
+    use rtic_monotonics::nrf::rtc::*;
+>>>>>>> b73c1a0 (works after swapin a pin)
 
     use crate::Mono;
 
@@ -34,9 +52,13 @@ mod app {
     #[local]
     struct Local {
         spim: Spi<SPI1>,
+<<<<<<< HEAD
         
         driver:Driver<Pin<Output<PushPull>>>
         //cs: Pin<Output<PushPull>>
+=======
+        cs: Pin<Output<PushPull>>
+>>>>>>> b73c1a0 (works after swapin a pin)
     }
 
     #[init]
@@ -47,12 +69,20 @@ mod app {
         let device = cx.device;
 
         // Initialize Monotonic
+<<<<<<< HEAD
         Clocks::new(device.CLOCK).start_lfclk().enable_ext_hfosc();
+=======
+        hal::clocks::Clocks::new(device.CLOCK).start_lfclk().enable_ext_hfosc();
+>>>>>>> b73c1a0 (works after swapin a pin)
         Mono::start(device.RTC0);
 
         let port0 = Parts::new(device.P0);
 
+<<<<<<< HEAD
         let sck: Pin<Output<PushPull>> = port0.p0_28.into_push_pull_output(Level::Low).degrade();
+=======
+        let sck: Pin<Output<PushPull>> = port0.p0_07.into_push_pull_output(Level::Low).degrade();
+>>>>>>> b73c1a0 (works after swapin a pin)
         let miso: Pin<Input<Floating>>= port0.p0_08.into_floating_input().degrade();
         let cs: Pin<Output<PushPull>>  = port0.p0_05.into_push_pull_output(Level::High).degrade();
         let mosi: Pin<Output<PushPull>> = port0.p0_06.into_push_pull_output(Level::Low).degrade();
@@ -60,18 +90,14 @@ mod app {
         defmt::info!("pre-driver");
   
         let pins = spi::Pins {
-            sck:  Some(sck),
+            sck: Some(sck),
             miso: Some(miso),
             mosi: Some(mosi)
         };
        
         let spim: Spi<SPI1> = Spi::new(device.SPI1, pins, Frequency::K250, embedded_hal::spi::MODE_0);
 
-        let driver = Driver::new(cs);
-
-        worker::spawn().unwrap();
-
-        //blast::spawn().ok().unwrap();
+        blast::spawn().ok().unwrap();
 
         (
             Shared {
@@ -79,25 +105,10 @@ mod app {
             },
             Local {
                 spim,
-                driver
-               //cs
+                cs
             },
         )
     }
-
-    #[task(local = [driver,spim],priority=2)]
-    async fn worker(cx:worker::Context) {
-        
-        let (driver, mut spim) = (cx.local.driver,cx.local.spim);
-
-        defmt::info!("Angle pre setting {:?}",  driver.read_angle(&mut spim));
-        defmt::info!("Read pre update {:?}",           driver.read_register::<Mono,_,_,_>(Register::ZeroSetting1,&mut spim).await);
-                                                       driver.write_register::<Mono,_,_,_>(Register::ZeroSetting1,&mut spim, 100).await;
-        defmt::info!("Read post update {:?}",          driver.read_register::<Mono,_,_,_>(Register::ZeroSetting1,&mut spim).await);
-        defmt::info!("Angle post setting {:?}", driver.read_angle(&mut spim));
-
-    }
-
 
     // Optional idle, can be removed if not needed.
     #[idle]
@@ -105,28 +116,23 @@ mod app {
         defmt::info!("idle");
 
         loop {
-            //blast::spawn().ok();
+            blast::spawn().ok();
         }
     }
 
-    /*
-    #[task(local = [spim, cs], priority = 2)]
+
+    #[task(local = [spim, cs], priority = 1)]
     async fn blast(cx: blast::Context) -> () {
-        defmt::info!("blast");
         let blast::LocalResources {cs, spim, .. } = cx.local;
 
         let mut angle: [u8; 2] = [0; 2];
         cs.set_low().ok();
-        //spim.read(cs, &mut angle).ok();
-        spim.read(&mut angle).ok();
+        //spim.transfer(cs, &mut angle).ok();
+        spim.transfer_in_place(&mut angle).ok();
         cs.set_high().ok();
-        //let tmp: u16 = (angle[0] as u16) + (angle[1] as u16) <<8;
-        defmt::info!("angle:{:?}",angle);
-        defmt::info!("angle:{:?}",u16::from_be_bytes(angle));
-        defmt::info!("angle:{:?}", (u16::from_be_bytes(angle) as f32 / u16::MAX as f32) * f32::consts::TAU); // Tau radians
 
-        
+        defmt::info!("angle:{:?}",angle);
         delay(10000000);
     }
-     */
+
 }
