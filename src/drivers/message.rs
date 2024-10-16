@@ -1,9 +1,10 @@
+//! CAN frame message support.
+//! ## Usage
+
 #![no_main]
 #![no_std]
 #![allow(unused)]
 #![allow(missing_docs)]
-
-
 
 use core::{str, usize};
 use digital::ErrorKind;
@@ -22,11 +23,16 @@ use embedded_can::{Error, Frame, nb::Can};
 use nb;
 use defmt::{Format, Formatter, write};
 
-///
+/// Represent a CAN message. 
 #[derive(Debug)]
 pub struct CanMessage{
+    /// CAN identifier, can be either Standard or Extended. 
     pub id: embedded_can::Id,
-    pub dlc: u8, // Data length code = length of data field. 
+    /// Data Length Code (DLC) - length of the data byte fields. 
+    pub dlc: u8,
+    /// Data bytes associated to a CAN frame. 
+    ///
+    /// Every RX/TX buffer, can use the data register D7 to D0 (8 bytes max).
     pub data: [u8; 8], // D7 - D0
 }
 
@@ -65,6 +71,9 @@ impl Frame for CanMessage {
 
 /// Here goes custom logic for the CanMessage struct type
 impl CanMessage {
+    /// Creates a new CAN message. 
+    ///
+    /// Would fail, if the provided data, exceedes 8 bytes. 
     pub fn new(id: impl Into<embedded_can::Id>, data: &[u8]) -> Option<Self> {
         if data.len() > 8 {
             return None;
@@ -99,7 +108,7 @@ impl CanMessage {
         full_standardid_as_u16
     }
 
-
+    /// Prints the ID, DLC, Data fields of a CAN message frame. 
     pub fn print_frame(&mut self){
         let id = self.id_raw() >> 5;
         let dlc = self.dlc;
@@ -107,6 +116,20 @@ impl CanMessage {
         defmt::info!("Id({:x}), DLC({:x}), Data({:08b})", id, dlc, data);
     }
 
+    /// Maps a CAN message to a byte sequence.
+    /// [0] = SIDH
+    /// [1] = SIDL
+    /// [2] = EID8
+    /// [3] = EID0
+    /// [4] = DLC
+    /// [5] = D0
+    /// [6] = D1
+    /// [7] = D2
+    /// [8] = D3
+    /// [9] = D4
+    /// [10] = D5
+    /// [11] = D6
+    /// [12] = D7
     pub fn to_bytes(&mut self) -> [u8; 13] {
         let mut byte_frame: [u8; 13] = [0; 13];
         let mut id_bytes: [u8; 2];
@@ -156,7 +179,7 @@ impl CanMessage {
     
 }
 
-/* This From trait would parse a type T into a CanMessage frame. */
+///This From trait would parse a type T into a CanMessage frame.
 impl From<[u8;13]> for CanMessage{
     fn from(byte_data: [u8;13]) -> Self {
         //let mut data = [0u8; 8];
