@@ -17,7 +17,7 @@ use controller as _;
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC0])]
 mod app {
 
-    use controller::drivers::{can::{CanControllSettings, CanDriver, CanSettings, OperationTypes, CLKPRE, McpClock, CanBitrate}, message::CanMessage};
+    use controller::drivers::{can::{AcceptanceFilterMask, CanBitrate, CanControllSettings, CanDriver, CanSettings, McpClock, OperationTypes, ReceiveBufferMode, CLKPRE, RXBN}, message::CanMessage};
     use controller::boards::*;
     use cortex_m::asm;
     use embedded_can::{StandardId, Frame};
@@ -86,7 +86,7 @@ mod app {
         
         let cs_pin = port1.p1_02.into_push_pull_output(Level::High).degrade(); 
         let can_interrupt = port1.p1_01.into_pullup_input().degrade();
-
+        
         let cs_node_pin = port1.p1_08.into_push_pull_output(Level::High).degrade();
         let can_node_interrupt = port1.p1_07.into_pullup_input().degrade();
 
@@ -102,13 +102,21 @@ mod app {
         const OSM: bool = false;
         const ABAT: bool = false; 
 
+        const MASK_RXN: u16 = 0b1111_1111_1110_0000;
+        const FILTER_RX0: u16 = 0x1;
+        const FILTER_RX1: u16 = 0x2; 
+
         let canctrl_settings = CanControllSettings::new(OperationTypes::Configuration, CLKEN, CLKPRE::DIV1, ABAT, OSM);
         
+
         let can_settings = CanSettings{
             canctrl: canctrl_settings,
             mcp_clk: McpClock::MCP8,
             can_bitrate: CanBitrate::CAN125,
             interrupts: 0u8,
+            rxm_mode: ReceiveBufferMode::OnlyStandardId,
+            rx0_filtermask: AcceptanceFilterMask::new(MASK_RXN, FILTER_RX0),
+            rx1_filtermask: AcceptanceFilterMask::new(MASK_RXN, FILTER_RX1),
         };
         
         let mut can_driver = CanDriver::init(spi, cs_pin, can_interrupt, can_settings);
@@ -125,10 +133,10 @@ mod app {
             .enable_interrupt();
 
         defmt::println!("After initializing Spi<SPI1>...");
-        let dummy_id = StandardId::new(0x1).unwrap();
+        let dummy_id = StandardId::new(0x2).unwrap();
         defmt::info!("dummy_data: {:?}", dummy_data.len());
         let mut frame = CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02, 0x03]).unwrap();
-       
+     
         //can_driver.loopback_test(frame);
         can_driver.transmit(&frame);
         //can_node.transmit(&frame);
@@ -154,7 +162,7 @@ mod app {
            
             if (gpiote.channel0().is_event_triggered()){
                 defmt::println!("\n");
-                defmt::info!("GPIOTE interrupt occured, for Can Master at channel 0!");
+                defmt::info!("GPIOTE interrupt occured [channel 0] - Can Master!");
                 let interrupt_type = cx.local.candriver.interrupt_decode().unwrap();
                 cx.local.candriver.handle_interrupt(interrupt_type);
            
@@ -168,7 +176,7 @@ mod app {
             }
             if (gpiote.channel1().is_event_triggered()) {
                 defmt::println!("\n");
-                defmt::info!("GPIOTE interrupt occured, for Can Node at channel 1!");
+                defmt::info!("GPIOTE interrupt occured [channel 1] - Can Node!");
                 let interrupt_type = cx.local.candriver_node.interrupt_decode().unwrap();
                 cx.local.candriver_node.handle_interrupt(interrupt_type); 
 
