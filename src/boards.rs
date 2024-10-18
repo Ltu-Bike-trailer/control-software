@@ -32,10 +32,10 @@ impl PinMapping<false, false> {
         // TODO: Move these to other crate.
 
         // Communications.
-        let sck = p0.p0_05.into_push_pull_output(gpio::Level::Low).degrade();        
+        let sck = p0.p0_05.into_push_pull_output(gpio::Level::Low).degrade();
         let mosi = p0.p0_06.into_push_pull_output(gpio::Level::Low).degrade();
         let miso = p0.p0_07.into_floating_input().degrade();
-        
+
         // Needs testing.
         let cs = p1.p1_08.into_push_pull_output(gpio::Level::High).degrade();
         let can_interrupt = p1.p1_06.into_floating_input().degrade();
