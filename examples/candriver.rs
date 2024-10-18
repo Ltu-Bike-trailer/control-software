@@ -190,7 +190,7 @@ mod app {
         let handle = cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
                 defmt::println!("\n");
-                defmt::info!("GPIOTE interrupt occured [channel 0] - Can Master!");
+                defmt::info!("GPIOTE interrupt occurred [channel 0] - Can Master!");
                 let interrupt_type = cx.local.candriver.interrupt_decode().unwrap();
                 cx.local.candriver.handle_interrupt(interrupt_type);
 
@@ -204,7 +204,7 @@ mod app {
             }
             if (gpiote.channel1().is_event_triggered()) {
                 defmt::println!("\n");
-                defmt::info!("GPIOTE interrupt occured [channel 1] - Can Node!");
+                defmt::info!("GPIOTE interrupt occurred [channel 1] - Can Node!");
                 let interrupt_type = cx.local.candriver_node.interrupt_decode().unwrap();
                 cx.local.candriver_node.handle_interrupt(interrupt_type);
 
