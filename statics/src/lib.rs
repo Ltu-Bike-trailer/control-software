@@ -1,6 +1,16 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{bracketed, parse::Parse, parse_macro_input, Data, DeriveInput, Ident, LitStr, Token};
+use syn::{
+    bracketed,
+    parse::Parse,
+    parse_macro_input,
+    Data,
+    DeriveInput,
+    Ident,
+    LitInt,
+    LitStr,
+    Token,
+};
 
 fn _hash(data: &str) -> u32 {
     let mut prev_sum: u32 = 0;
@@ -62,6 +72,61 @@ pub fn numel(item: TokenStream) -> TokenStream {
         #input
     }
     .into()
+}
+
+struct PwmTableInput {
+    timer_resolution: u8,
+    pwm_resolution: u8,
+}
+
+impl Parse for PwmTableInput {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let timer: Ident = input.parse()?;
+        if timer.to_string().to_lowercase() != "timer bits" {
+            return syn::Result::Err(syn::Error::new_spanned(timer, "Expected \"timer bits\""));
+        }
+        let _: Token![:] = input.parse()?;
+        let resolution: LitInt = input.parse()?;
+        let timer_resolution = match u8::from_str_radix(resolution.clone().base10_digits(), 10) {
+            Ok(val) => val,
+            Err(_) => {
+                return syn::Result::Err(
+                    (syn::Error::new_spanned(resolution, "Expected a valid u8")),
+                )
+            }
+        };
+
+        let pwm: Ident = input.parse()?;
+        if pwm.to_string().to_lowercase() != "pwm bits" {
+            return syn::Result::Err(syn::Error::new_spanned(pwm, "Expected \"pwm bits\""));
+        }
+        let _: Token![:] = input.parse()?;
+        let resolution: LitInt = input.parse()?;
+        let pwm_resolution = match u8::from_str_radix(resolution.clone().base10_digits(), 10) {
+            Ok(val) => val,
+            Err(_) => {
+                return syn::Result::Err(syn::Error::new_spanned(resolution, "Expected a valid u8"))
+            }
+        };
+
+        Ok(Self {
+            pwm_resolution,
+            timer_resolution,
+        })
+    }
+}
+
+
+
+
+#[proc_macro]
+/// Generates a LUT for all of possible pwm values.
+pub fn generate_pwm_table(item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as PwmTableInput);
+
+
+
+    todo!()
 }
 
 #[proc_macro_derive(Iter)]

@@ -78,11 +78,11 @@ mod app {
         let foc_manager = foc::Foc::<SpaceVector, { 1 << 15 }>::new(
             foc::pid::PIController::new(
                 fixed::FixedI32::from_num(10),
-                fixed::FixedI32::from_num(2),
+                fixed::FixedI32::from_num(10),
             ),
             foc::pid::PIController::new(
                 fixed::FixedI32::from_num(10),
-                fixed::FixedI32::from_num(2),
+                fixed::FixedI32::from_num(10),
             ),
         );
         let p0 = nrf52840_hal::gpio::p0::Parts::new(cx.device.P0);
@@ -109,7 +109,7 @@ mod app {
         phase2
             .set_output_pin(pwm::Channel::C0, p2.high_side)
             .set_output_pin(pwm::Channel::C1, p2.low_side)
-            .set_period(1000u32.khz().into())
+            .set_period(100u32.khz().into())
             .set_duty(0.1);
         phase2.center_align();
         let phase3 = Pwm::new(cx.device.PWM2);
@@ -183,6 +183,7 @@ mod app {
                     GpioEvents::CAN => todo!("Handle CAN event"),
                 }
             }
+            //defmt::info!("Event :/");
 
             // We are the only sender so we will always acquire the lock.
             let _ = cx.local.foc_sender.try_send(pattern.get_state());
@@ -204,40 +205,55 @@ mod app {
         let (p1, p2, p3) = (cx.local.phase1, cx.local.phase2, cx.local.phase3);
         let mut prev_time = Mono::now();
         let mut angle: fixed::types::I16F16 = fixed::types::I16F16::default();
+        let mut counter = 0;
         loop {
-            if let Ok(val) = cx.local.foc_receiver.try_recv() {
-                defmt::info!("SPINNING {}", val);
+            if let Ok(mut val) = cx.local.foc_receiver.try_recv() {
+                while let Ok(new_val) = cx.local.foc_receiver.try_recv() {
+                    val = new_val;
+                }
+                defmt::info!("Loops since latest update : {}", counter);
+                counter = 0;
                 let intermediate: fixed::types::I16F16 =
                     fixed::types::I16F16::from_num(32. * 360. / core::f32::consts::PI);
+                // ANGLES :) https://electronics.stackexchange.com/questions/480155/bldc-hall-sensor-angle
                 angle = match val {
-                    0b110 => fixed::types::I16F16::from_num(32. * 180. / core::f32::consts::PI),
-                    0b100 => fixed::types::I16F16::from_num(96. * 180. / core::f32::consts::PI),
+                    0b110 => fixed::types::I16F16::from_num(288. * 180. / core::f32::consts::PI),
+                    0b100 => fixed::types::I16F16::from_num(224. * 180. / core::f32::consts::PI),
                     0b101 => fixed::types::I16F16::from_num(160. * 180. / core::f32::consts::PI),
-                    0b001 => fixed::types::I16F16::from_num(224. * 180. / core::f32::consts::PI),
-                    0b011 => fixed::types::I16F16::from_num(288. * 180. / core::f32::consts::PI),
+                    0b001 => fixed::types::I16F16::from_num(96. * 180. / core::f32::consts::PI),
+                    0b011 => fixed::types::I16F16::from_num(32. * 180. / core::f32::consts::PI),
                     0b010 => fixed::types::I16F16::from_num(352. * 180. / core::f32::consts::PI),
-                    _val => fixed::types::I16F16::max(
-                        fixed::types::I16F16::TAU,
-                        angle + fixed::types::I16F16::from_num(0.1),
-                    ),
+                    0 => angle,
+                    val => {
+                        defmt::info!("Invalid state reached {}", val);
+                        panic!();
+                        fixed::types::I16F16::max(
+                            fixed::types::I16F16::TAU,
+                            angle + fixed::types::I16F16::from_num(0.01),
+                        )
+                    }
                 };
             } else {
+                counter += 1;
                 angle = fixed::types::I16F16::max(
                     fixed::types::I16F16::TAU,
-                    angle + fixed::types::I16F16::from_num(0.1),
+                    angle + fixed::types::I16F16::from_num(0.01),
                 );
             }
             // Make this async to allow other tasks to urn in the mean time.
             let current = match cx.local.current_sense.sample().await {
-                Ok([c1, c2, _c3]) => [
-                    fixed::types::I16F16::from_num(c1),
-                    fixed::types::I16F16::from_num(c2),
-                ],
+                Ok([c1, c2, c3]) => {
+                    //defmt::info!("Measured currents : {}\t{}\t{}", c1, c2, c3);
+                    [
+                        fixed::types::I16F16::from_num(c1),
+                        fixed::types::I16F16::from_num(c2),
+                    ]
+                }
                 Err(_) => continue,
             };
             let time = Mono::now();
 
-            let [pa, pb, pc] = foc.update(
+            let [mut pa, mut pb, mut pc] = foc.update(
                 current,
                 angle,
                 // The power target in amperes.
@@ -247,46 +263,54 @@ mod app {
                         .to_micros(),
                 ),
             );
+            //let target = prev_time + 1u32.micros();
             prev_time = time;
 
-            const AVG: u16 = u16::MAX;
-            if pa > AVG {
+            const AVG: f32 = (1u16 << 15) as f32;
+            //defmt::info!("Applying {},{},{}\t AVG {}", pa, pb, pc, AVG);
+
+            if pa > 0. {
+                //defmt::info!("HIGHSIDE p1");
                 p1.enable_channel(pwm::Channel::C0);
                 p1.disable_channel(pwm::Channel::C1);
-                let pa = pa - AVG;
+                pa = pa / AVG / 36.;
             } else {
-                let pa = AVG - pa;
+                pa = -pa / AVG / 36.;
                 p1.enable_channel(pwm::Channel::C1);
                 p1.disable_channel(pwm::Channel::C0);
             }
 
-            if pb > AVG {
+            if pb > 0. {
+                //defmt::info!("HIGHSIDE p2");
                 p2.enable_channel(pwm::Channel::C0);
                 p2.disable_channel(pwm::Channel::C1);
-                let pb = pb - AVG;
+                pb = pb / AVG / 36.;
             } else {
-                let pb = AVG - pb;
+                pb = -pb / AVG / 36.;
                 p2.enable_channel(pwm::Channel::C1);
                 p2.disable_channel(pwm::Channel::C0);
             }
 
-            if pc > AVG {
+            if pc > 0. {
+                //defmt::info!("HIGHSIDE p3");
                 p3.enable_channel(pwm::Channel::C0);
                 p3.disable_channel(pwm::Channel::C1);
-                let pc = pc - AVG;
+                pc = pc / AVG / 36.;
             } else {
-                let pc = AVG - pc;
+                pc = -pc / AVG / 36.;
                 p3.enable_channel(pwm::Channel::C1);
                 p3.disable_channel(pwm::Channel::C0);
             }
-
-            // Apply changes.
+            //defmt::info!("Applying {},{},{}\t AVG {}", pa, pb, pc, AVG);
+            // Apply changes
+            p1.set_duty(pa.min(1.));
+            p2.set_duty(pb.min(1.));
+            p3.set_duty(pc.min(1.));
             p1.enable();
-            p1.set_duty(pa as f32 / AVG as f32);
             p2.enable();
-            p2.set_duty(pb as f32 / AVG as f32);
             p3.enable();
-            p3.set_duty(pc as f32 / AVG as f32);
+            //Mono::delay_until(target).await;
+            //Mono::delay_until
         }
     }
 
