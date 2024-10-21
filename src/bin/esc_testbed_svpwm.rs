@@ -41,12 +41,8 @@ mod app {
     #[shared]
     struct Shared {
         // TODO: Add resources
-        drive_pattern: DrivePattern,
         sender: protocol::sender::Sender<10>,
-        duty: f32,
-        phase1: Pwm<PWM0>,
-        phase2: Pwm<PWM1>,
-        phase3: Pwm<PWM2>,
+        duty: u16,
         velocity: f32,
     }
 
@@ -57,12 +53,22 @@ mod app {
         events: esc::events::Manager,
         current_sense: esc::CurrentManager,
         hal_pins: [Pin<Input<PullUp>>; 3],
+        phase1: Pwm<PWM0>,
+        phase2: Pwm<PWM1>,
+        phase3: Pwm<PWM2>,
+        drive_pattern: DrivePattern,
+        pattern_sender:
+            rtic_sync::channel::Sender<'static, ((bool, bool), (bool, bool), (bool, bool)), 10>,
+        pattern_receiver:
+            rtic_sync::channel::Receiver<'static, ((bool, bool), (bool, bool), (bool, bool)), 10>,
     }
 
     #[init]
     fn init(cx: init::Context) -> (Shared, Local) {
         defmt::info!("init");
-        nrf52840_hal::Clocks::new(cx.device.CLOCK).enable_ext_hfosc();
+        nrf52840_hal::Clocks::new(cx.device.CLOCK)
+            .enable_ext_hfosc()
+            .start_lfclk();
         Mono::start(cx.device.RTC0);
 
         let p0 = nrf52840_hal::gpio::p0::Parts::new(cx.device.P0);
@@ -88,7 +94,7 @@ mod app {
         phase2
             .set_output_pin(pwm::Channel::C0, p2.high_side)
             .set_output_pin(pwm::Channel::C1, p2.low_side)
-            .set_period(1000u32.khz().into())
+            .set_period(100u32.khz().into())
             .set_duty(0.1);
         let phase3 = Pwm::new(cx.device.PWM2);
         phase3
@@ -104,6 +110,9 @@ mod app {
 
         let sender = protocol::sender::Sender::new();
         debug_assert!(Mono::now().duration_since_epoch().to_micros() != 0);
+        let (pattern_sender, pattern_receiver) =
+            rtic_sync::make_channel!(((bool, bool), (bool, bool), (bool, bool)), 10);
+
         /*
         if unsafe { hal_pins[0].is_high().unwrap_unchecked() } {
             drive_pattern.set_a();
@@ -118,17 +127,13 @@ mod app {
         }
         */
         // Spawn the tasks.
-        //motor_driver::spawn().ok().unwrap();
+        motor_driver::spawn().ok().unwrap();
 
         (
             Shared {
                 // Initialization of shared resources go here
-                drive_pattern,
                 sender,
-                duty: 0.1,
-                phase1,
-                phase2,
-                phase3,
+                duty: phase1.max_duty() / 10,
                 velocity: 0.,
             },
             Local {
@@ -136,11 +141,23 @@ mod app {
                 events,
                 current_sense,
                 hal_pins,
+                phase1,
+                phase2,
+                phase3,
+                drive_pattern,
+                pattern_receiver,
+                pattern_sender,
             },
         )
     }
 
-    #[task(binds=GPIOTE, local=[events,hal_pins,t:Option<u64> = None],shared = [drive_pattern,phase1,phase2,phase3,duty,velocity], priority = 5)]
+    #[task(binds=GPIOTE, local=[
+        events,
+        hal_pins,
+        t:Option<u64> = None,
+        drive_pattern,
+        pattern_sender
+        ], priority = 5)]
     /// Manages gpiote interrupts.
     ///
     /// This is every pin interrupt. So hal effect feedback, can bus messages
@@ -154,71 +171,92 @@ mod app {
     /// controller requests a new velocity.
     ///
     /// This ensures that the motor can be started from standstill.
-    fn handle_gpio(mut cx: handle_gpio::Context) {
-        let t = Mono::now();
-        let mut set_phase = false;
+    fn handle_gpio(cx: handle_gpio::Context) {
         for event in cx.local.events.events() {
             match event {
                 GpioEvents::P1HalRising => {
                     //defmt::info!("P1 hal rising");
-                    cx.shared.drive_pattern.lock(|pattern| pattern.set_a());
-                    set_phase = true;
+                    cx.local.drive_pattern.set_a();
                 }
                 GpioEvents::P1HalFalling => {
                     //defmt::info!("P2 hal falling");
-                    cx.shared.drive_pattern.lock(|pattern| pattern.clear_a());
-                    set_phase = true;
+                    cx.local.drive_pattern.clear_a();
                 }
                 GpioEvents::P2HalRising => {
                     //defmt::info!("P2 hal rising");
-                    cx.shared.drive_pattern.lock(|pattern| pattern.set_b());
-                    set_phase = true;
+                    cx.local.drive_pattern.set_b();
                 }
                 GpioEvents::P2HalFalling => {
+                    cx.local.drive_pattern.clear_b();
                     //defmt::info!("P2 hal falling");
-                    cx.shared.drive_pattern.lock(|pattern| pattern.clear_b());
-                    set_phase = true;
                 }
                 GpioEvents::P3HalRising => {
                     //defmt::info!("P3 hal rising");
-                    cx.shared.drive_pattern.lock(|pattern| pattern.set_c());
-                    set_phase = true;
+                    cx.local.drive_pattern.set_c();
                 }
                 GpioEvents::P3HalFalling => {
                     //defmt::info!("P3 hal falling");
-                    cx.shared.drive_pattern.lock(|pattern| pattern.clear_c());
-                    set_phase = true;
+                    cx.local.drive_pattern.clear_c();
                 }
                 GpioEvents::CAN => todo!("Handle CAN event"),
             }
         }
+        let _ = cx
+            .local
+            .pattern_sender
+            .try_send(cx.local.drive_pattern.get());
 
-        if !set_phase {
-            return;
-        }
-
-        // Trigger the phases inline since we want to run it as fast as possible.
+        // Trigger the phases inline since we want to run it as fast as
+        // possible.
         //
-        // Doing it this way ensures that we never miss a state, given that the app i
-        // schedulable.
+        // Doing it this way ensures that we never miss a state, given that the
+        // app i schedulable.
         //defmt::info!("Got hal effect interrupt!");
-        let (mut drive_pattern, mut duty) = (cx.shared.drive_pattern, cx.shared.duty);
+    }
 
-        let (((p1h, p1l), (p2h, p2l), (p3h, p3l)), duty) =
-            (&mut drive_pattern, &mut duty).lock(|pattern, duty| (pattern.get(), *duty));
-        /*defmt::info!(
-            "Pattern Ah {}, Al {}, Bh {}, Bl {}, Ch {}, Cl {}",
-            p1h,
-            p1l,
-            p2h,
-            p2l,
-            p3h,
-            p3l
-        );*/
-        debug_assert!(p1h != p1l || !p1h);
-        debug_assert!(p2h != p2l || !p2h);
-        debug_assert!(p3h != p3l || !p3h);
-        (cx.shared.phase1, cx.shared.phase2, cx.shared.phase3).lock(|phase1, phase2, phase3| {
+    #[task(local = [phase1,phase2,phase3,pattern_receiver],shared = [duty],priority = 2)]
+    /// Drives the phases of the motor.
+    ///
+    /// This is done by disabling the high/low side of each phase with respect
+    /// to the switching pattern.
+    ///
+    /// This function should only be called by the PID controller.
+    ///
+    /// This ensures that the velocity can be set without dependance on the rate
+    /// of interrupts.
+    async fn motor_driver(mut cx: motor_driver::Context) {
+        let (phase1, phase2, phase3) = (cx.local.phase1, cx.local.phase2, cx.local.phase3);
+        let mut duty = 0;
+
+        let ((mut p1h, mut p1l), (mut p2h, mut p2l), (mut p3h, mut p3l)) = Default::default();
+        loop {
+            if let Ok(mut val) = cx.local.pattern_receiver.try_recv() {
+                while let Ok(newval) = cx.local.pattern_receiver.try_recv() {
+                    val = newval;
+                }
+                ((p1h, p1l), (p2h, p2l), (p3h, p3l)) = val;
+                duty = cx.shared.duty.lock(|duty| duty.clone());
+                defmt::info!("ZOOOM");
+            } else {
+                /*if duty > 50 {
+                    duty -= 1;
+                } else {
+                    duty = 0;
+                }*/
+            }
+            //(&mut drive_pattern, &mut duty).lock(|pattern, duty| (pattern.get(), *duty));
+            /*defmt::info!(
+                "Pattern Ah {}, Al {}, Bh {}, Bl {}, Ch {}, Cl {}",
+                p1h,
+                p1l,
+                p2h,
+                p2l,
+                p3h,
+                p3l
+            );*/
+            debug_assert!(p1h != p1l || !p1h);
+            debug_assert!(p2h != p2l || !p2h);
+            debug_assert!(p3h != p3l || !p3h);
             match (p1h, p1l) {
                 (true, false) => {
                     phase1.disable_channel(pwm::Channel::C1);
@@ -272,10 +310,10 @@ mod app {
                 }
                 _ => panic!("Tried to kill the system on phase 3 :("),
             };
-            phase1.set_duty(duty);
-            phase2.set_duty(duty);
-            phase3.set_duty(duty);
-        });
+            phase1.set_duty_on_common(duty);
+            phase2.set_duty_on_common(duty);
+            phase3.set_duty_on_common(duty);
+        }
     }
 
     /// When ever the system is not running we should sample the current.
