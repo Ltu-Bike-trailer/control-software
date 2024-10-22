@@ -22,14 +22,11 @@ nrf_rtc0_monotonic!(Mono);
 )]
 mod app {
 
-    use controller::{
-        bldc::{DrivePattern, FloatDuty},
-        cart::controllers::{MotorPid, MOTOR_TS},
-    };
+    use controller::bldc::{DrivePattern, FloatDuty};
     use cortex_m::asm;
     //use embedded_hal::digital::InputPin;
     use esc::{self, events::GpioEvents, PinConfig};
-    use lib::{pid::Pid, protocol};
+    use lib::protocol;
     use nrf52840_hal::{
         gpio::{Input, Pin, PullUp},
         pac::{PWM0, PWM1, PWM2},
@@ -64,8 +61,6 @@ mod app {
             rtic_sync::channel::Sender<'static, ((bool, bool), (bool, bool), (bool, bool)), 10>,
         pattern_receiver:
             rtic_sync::channel::Receiver<'static, ((bool, bool), (bool, bool), (bool, bool)), 10>,
-        hz_sender: rtic_sync::channel::Sender<'static, f32, 10>,
-        hz_receiver: rtic_sync::channel::Receiver<'static, f32, 10>,
     }
 
     #[init]
@@ -92,21 +87,20 @@ mod app {
         phase1
             .set_output_pin(pwm::Channel::C0, p1.high_side)
             .set_output_pin(pwm::Channel::C1, p1.low_side)
-            // 20 IS :) 22 BETTER
-            .set_period(23u32.khz().into())
+            .set_period(10u32.khz().into())
             .set_duty(0.1);
 
         let phase2 = Pwm::new(cx.device.PWM1);
         phase2
             .set_output_pin(pwm::Channel::C0, p2.high_side)
             .set_output_pin(pwm::Channel::C1, p2.low_side)
-            .set_period(23u32.khz().into())
+            .set_period(10u32.khz().into())
             .set_duty(0.1);
         let phase3 = Pwm::new(cx.device.PWM2);
         phase3
             .set_output_pin(pwm::Channel::C0, p3.high_side)
             .set_output_pin(pwm::Channel::C1, p3.low_side)
-            .set_period(23u32.khz().into())
+            .set_period(10u32.khz().into())
             .set_duty(0.1);
         phase1.center_align();
         phase2.center_align();
@@ -118,7 +112,6 @@ mod app {
         debug_assert!(Mono::now().duration_since_epoch().to_micros() != 0);
         let (pattern_sender, pattern_receiver) =
             rtic_sync::make_channel!(((bool, bool), (bool, bool), (bool, bool)), 10);
-        let (hz_sender, hz_receiver) = rtic_sync::make_channel!(f32, 10);
 
         /*
         if unsafe { hal_pins[0].is_high().unwrap_unchecked() } {
@@ -134,15 +127,15 @@ mod app {
         }
         */
         // Spawn the tasks.
-        motor_driver::spawn().ok().unwrap();
+        //motor_driver::spawn().ok().unwrap();
         //mono_sweep::spawn().ok().unwrap();
-        velocity_control::spawn().ok().unwrap();
+
         (
             Shared {
                 // Initialization of shared resources go here
                 sender,
                 // ~.1 = MAX speed, ~.7 zero speed
-                duty: 0.95,
+                duty: 0.75,
                 velocity: 0.,
             },
             Local {
@@ -156,8 +149,6 @@ mod app {
                 drive_pattern,
                 pattern_receiver,
                 pattern_sender,
-                hz_receiver,
-                hz_sender,
             },
         )
     }
@@ -165,10 +156,10 @@ mod app {
     #[task(binds=GPIOTE, local=[
         events,
         hal_pins,
-        t:Option<rtic_monotonics::fugit::Instant<u64, 1, 32768>> = None,
+        t:Option<u64> = None,
         drive_pattern,
         pattern_sender,
-        hz_sender
+        edge_counter:(usize,usize,usize) = (0,0,0)
         ], priority = 5)]
     /// Manages gpiote interrupts.
     ///
@@ -184,17 +175,13 @@ mod app {
     ///
     /// This ensures that the motor can be started from standstill.
     fn handle_gpio(cx: handle_gpio::Context) {
-        let now: rtic_monotonics::fugit::Instant<u64, 1, 32768> = Mono::now();
-        let mut dt = None;
+        let edges = cx.local.edge_counter;
         for event in cx.local.events.events() {
             match event {
                 GpioEvents::P1HalRising => {
                     //defmt::info!("P1 hal rising");
                     cx.local.drive_pattern.set_a();
-                    let old_time = cx.local.t.replace(now.clone());
-                    if let Some(old_time) = old_time {
-                        dt = Some(now.checked_duration_since(old_time).unwrap());
-                    }
+                    edges.0 += 1;
                 }
                 GpioEvents::P1HalFalling => {
                     //defmt::info!("P2 hal falling");
@@ -203,6 +190,7 @@ mod app {
                 GpioEvents::P2HalRising => {
                     //defmt::info!("P2 hal rising");
                     cx.local.drive_pattern.set_b();
+                    edges.1 += 1;
                 }
                 GpioEvents::P2HalFalling => {
                     cx.local.drive_pattern.clear_b();
@@ -211,6 +199,7 @@ mod app {
                 GpioEvents::P3HalRising => {
                     //defmt::info!("P3 hal rising");
                     cx.local.drive_pattern.set_c();
+                    edges.2 += 1;
                 }
                 GpioEvents::P3HalFalling => {
                     //defmt::info!("P3 hal falling");
@@ -223,12 +212,7 @@ mod app {
             .local
             .pattern_sender
             .try_send(cx.local.drive_pattern.get());
-
-        if let Some(delta) = dt {
-            let hz = 1. / (delta.to_micros() as f32 * 0.000_000_1) / 86.;
-            let _ = cx.local.hz_sender.try_send(hz);
-        }
-
+        defmt::info!("Edges {:?}", edges);
         // Trigger the phases inline since we want to run it as fast as
         // possible.
         //
@@ -342,72 +326,9 @@ mod app {
         }
     }
 
-    #[task(shared = [duty],local=[current_sense], priority = 3)]
-    async fn velocity_control(mut cx: velocity_control::Context) {
-        let output: f32 = 0.;
-        let mut controller: MotorPid = Pid::new(output);
-        let mut prev_time = None;
-        controller.follow([0.5]);
+    #[task(shared = [duty], priority = 3)]
+    async fn mono_sweep(mut cx: mono_sweep::Context) {
         loop {
-            let time = Mono::now();
-            let [p1, p2, p3] = cx.local.current_sense.sample().await;
-            let current = p1 + p2 + p3;
-            controller.follow([1.]);
-
-            let prev_time = prev_time.replace(time.clone());
-
-            defmt::info!("Current : {} {} {} {}", current, p1, p2, p3);
-            controller.register_measurement(-current, 0);
-
-            if prev_time.is_none() {
-                continue;
-            }
-            let prev_time = unsafe { prev_time.unwrap_unchecked() };
-            let dt = unsafe { prev_time.checked_duration_since(time).unwrap_unchecked() };
-
-            let output = controller.actuate();
-            if let Ok(output) = output {
-                //defmt::info!("CONTROLLING :) {}", output.actuation);
-                cx.shared.duty.lock(|duty| {
-                    *duty = output.actuation.clamp(0.3, 0.95);
-                    //defmt::info!("Using {} duty cycle", *duty);
-                });
-            }
-            Mono::delay_until(time + (MOTOR_TS as u32).micros()).await;
-        }
-        /*
-        let output: f32 = 0.;
-        let mut controller: MotorPid = PidDynamic::new(output);
-        let mut prev_time = None;
-        controller.follow([10.]);
-
-        loop {
-            // Rotations per second
-            let t = cx.local.hz_receiver.recv().await.unwrap() / 86.;
-            let now = Mono::now();
-            let prev_time = prev_time.replace(now.clone());
-
-            defmt::info!("Freq : {}", t);
-            controller.register_measurement(t, 0);
-
-            if prev_time.is_none() {
-                continue;
-            }
-            let prev_time = unsafe { prev_time.unwrap_unchecked() };
-
-            let dt = unsafe { now.checked_duration_since(prev_time).unwrap_unchecked() };
-
-            controller.follow([10.]);
-            let output = controller.actuate(dt.to_micros());
-            defmt::info!("CONTROLLING :) {}", output.is_err());
-            if let Ok(output) = output {
-                cx.shared.duty.lock(|duty| {
-                    *duty = output.actuation.clamp(0.45, 0.95);
-                    defmt::info!("Using {} duty cycle", *duty);
-                });
-            }
-            Mono::delay(20u32.micros().into()).await;
-            /*
             cx.shared.duty.lock(|duty| {
                 *duty -= 0.1;
                 if *duty <= 0.1 {
@@ -415,27 +336,12 @@ mod app {
                 }
                 defmt::info!("Using {} duty cycle", *duty);
             });
-            */
-        }
-        */
-    }
-
-    #[task(shared = [duty], priority = 3)]
-    async fn mono_sweep(mut cx: mono_sweep::Context) {
-        loop {
-            Mono::delay(2u32.secs().into()).await;
-            cx.shared.duty.lock(|duty| {
-                *duty -= 0.05;
-                if *duty <= 0.35 {
-                    *duty = 0.35;
-                }
-                defmt::info!("Using {} duty cycle", *duty);
-            });
+            Mono::delay(10u32.secs().into()).await;
         }
     }
 
     /// When ever the system is not running we should sample the current.
-    #[idle(shared = [sender,duty])]
+    #[idle(local=[current_sense],shared = [sender,duty])]
     fn idle(_cx: idle::Context) -> ! {
         defmt::info!("idle");
         loop {}

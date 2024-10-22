@@ -16,6 +16,7 @@ impl<T: Instance> FloatDuty for Pwm<T> {
             duty_cycle >= 0.,
             "Duty cycle has to be a positive percentage"
         );
+        let duty_cycle = 1. - duty_cycle;
         self.set_duty_on_common((f32::from(self.max_duty()) * duty_cycle) as u16);
     }
 }
