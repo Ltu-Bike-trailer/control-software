@@ -10,10 +10,11 @@ defmt = { version = "0.3", features = ["encoding-rzcobs"] }
 defmt-rtt = { version = "0.4" }
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 rtic = { version = "2.1.1", features = ["thumbv7-backend"] }
-nrf52840-hal = { git = "https://github.com/nrf-rs/nrf-hal/", features = [
+#nrf52840-hal = { git = "ssh://git@github.com/Ltu-Bike-trailer/nrf-hal.git", rev = "320bd06661256e91ecde4dc51550dc2c176bc36a", features = [
+nrf52840-hal = { path = "../nrf-hal/nrf52840-hal", features = [
     "rt",
 ], default-features = false }
-rtic-monotonics = { version = "1.0.0", features = [
+rtic-monotonics = { version = "2.0.2", features = [
     "cortex-m-systick",
     "nrf52840",
 ] }
@@ -21,12 +22,13 @@ rtic-sync = "1.3.0"
 embedded-hal = "1.0.0"
 statics = { path = "./statics" }
 
-lib = { path = "./lib",default-features = false }
+lib = { path = "./lib", default-features = false }
 # Helpers
 
 ## Defines a double ended queue implementation of arrays instead of vectors
 arraydeque = { version = "0.5.1", default-features = false }
 
+bsp = { path = "../Power-supply/bsp", package = "battery-controller" }
 # cargo build/run
 [profile.dev]
 codegen-units = 1
