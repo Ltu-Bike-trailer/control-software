@@ -66,6 +66,8 @@ mod app {
             rtic_sync::channel::Receiver<'static, ((bool, bool), (bool, bool), (bool, bool)), 10>,
         hz_sender: rtic_sync::channel::Sender<'static, f32, 10>,
         hz_receiver: rtic_sync::channel::Receiver<'static, f32, 10>,
+        current_sender: rtic_sync::channel::Sender<'static, [f32; 3], 10>,
+        current_receiver: rtic_sync::channel::Receiver<'static, [f32; 3], 10>,
     }
 
     #[init]
@@ -119,6 +121,7 @@ mod app {
         let (pattern_sender, pattern_receiver) =
             rtic_sync::make_channel!(((bool, bool), (bool, bool), (bool, bool)), 10);
         let (hz_sender, hz_receiver) = rtic_sync::make_channel!(f32, 10);
+        let (current_sender, current_receiver) = rtic_sync::make_channel!([f32; 3], 10);
 
         /*
         if unsafe { hal_pins[0].is_high().unwrap_unchecked() } {
@@ -156,6 +159,8 @@ mod app {
                 drive_pattern,
                 pattern_receiver,
                 pattern_sender,
+                current_sender,
+                current_receiver,
                 hz_receiver,
                 hz_sender,
             },
@@ -237,6 +242,14 @@ mod app {
         //defmt::info!("Got hal effect interrupt!");
     }
 
+    #[task(local=[current_sense,current_sender], binds = SAADC)]
+    fn sample_current(cx: sample_current::Context) {
+        let _ = cx
+            .local
+            .current_sender
+            .try_send(cx.local.current_sense.complete_sample());
+        cx.local.current_sense.start_sample();
+    }
     #[task(local = [phase1,phase2,phase3,pattern_receiver],shared = [duty],priority = 2)]
     /// Drives the phases of the motor.
     ///
@@ -342,7 +355,7 @@ mod app {
         }
     }
 
-    #[task(shared = [duty],local=[current_sense], priority = 3)]
+    #[task(shared = [duty],local = [current_receiver], priority = 3)]
     async fn velocity_control(mut cx: velocity_control::Context) {
         let output: f32 = 0.;
         let mut controller: MotorPid = Pid::new(output);
@@ -350,7 +363,7 @@ mod app {
         controller.follow([0.5]);
         loop {
             let time = Mono::now();
-            let [p1, p2, p3] = cx.local.current_sense.sample().await;
+            let [p1, p2, p3] = cx.local.current_receiver.recv().await;
             let current = p1 + p2 + p3;
             controller.follow([1.]);
 
