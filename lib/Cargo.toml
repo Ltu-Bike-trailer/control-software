@@ -8,9 +8,7 @@ heapless = "0.8.0"
 embedded-can = "0.4.1"
 statics = { path = "../statics" }
 arraydeque = { version = "0.5.1", default-features = false }
-defmt = { version = "0.3"}
 
 [features]
 std = []
 default = ["std"]
-

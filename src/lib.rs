@@ -15,8 +15,13 @@
     rust_2018_idioms,
     rust_2024_compatibility
 )]
-#![allow(clippy::manual_range_contains)]
+#![allow(clippy::manual_range_contains, clippy::inline_always)]
+
 use core::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(feature = "esc")]
+pub mod bldc;
+pub mod cart;
+//pub mod svm;
 
 use defmt_rtt as _;
 use panic_probe as _;
