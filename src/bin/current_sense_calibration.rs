@@ -19,8 +19,8 @@ nrf_rtc0_monotonic!(Mono);
 )]
 mod app {
     use bsp::CurrentManager;
-    use rtic_monotonics::{fugit::ExtU32, Monotonic};
 
+    //use rtic_monotonics::{fugit::ExtU32, Monotonic};
     use super::Mono;
 
     // Shared resources go here
@@ -47,14 +47,14 @@ mod app {
         let pa = nrf52840_hal::gpio::p0::Parts::new(cx.device.P0);
         let pb = nrf52840_hal::gpio::p1::Parts::new(cx.device.P1);
         let board = bsp::PinConfig::new(pa, pb);
-        let (_board, adc) = board.configure_adc(cx.device.SAADC);
-
+        let (_board, mut adc) = board.configure_adc(cx.device.SAADC);
+        adc.start_sample();
         // TODO setup monotonic if used
         // let sysclk = { /* clock setup + returning sysclk as an u32 */ };
         // let token = rtic_monotonics::create_systick_token!();
         // rtic_monotonics::systick::Systick::new(cx.core.SYST, sysclk, token);
-        task1::spawn().ok().unwrap();
-
+        //task1::spawn().ok().unwrap();
+        defmt::info!("Out of init");
         (
             Shared {
                 // Initialization of shared resources go here
@@ -75,7 +75,14 @@ mod app {
             continue;
         }
     }
+    #[task(local=[adc], binds = SAADC)]
+    fn sample_current(cx: sample_current::Context) {
+        let read = cx.local.adc.complete_sample();
+        defmt::info!("Read : {} A", read[0]);
+        cx.local.adc.start_sample();
+    }
 
+    /*
     // TODO: Add tasks
     #[task(priority = 1,local=[adc])]
     async fn task1(cx: task1::Context) {
@@ -85,5 +92,5 @@ mod app {
             defmt::info!("Current : {}A", sample);
             Mono::delay(10u32.millis().into()).await;
         }
-    }
+    }*/
 }
