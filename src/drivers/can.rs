@@ -381,7 +381,7 @@ pub struct AcceptanceFilterMask {
     acceptance_filter: u16,
 }
 
-/// Struct for neccessary settings for setting up the MCP2515 CAN module.
+/// Struct for necessary settings for setting up the MCP2515 CAN module.
 #[derive(Clone, Copy)]
 pub struct Mcp2515Settings {
     pub canctrl: SettingsCanCtrl,
@@ -893,7 +893,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
     }
 
     /// RTS - Request-To-Send instruction.
-    /// This is called after a Load TX instruction has been runned.
+    /// This is called after a Load TX instruction has been run.
     /// It will work, when TXREQ bits are set to 1, indicating TX is pending.  
     fn request_to_send(&mut self, buffer: TXBN) {
         let rts_instruction: u8 = match buffer {
@@ -964,7 +964,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
         self.spi.write(&[instruction])?;
         self.spi.transfer(&mut rx_buffer, &[0; 13]).ok(); // Read the 14 bytes of CAN data
         self.cs.set_high();
-        /* End of transation. */
+        /* End of transaction. */
 
         let mut frame = CanMessage::try_from(rx_buffer);
         //defmt::println!("Reading RX buffer (received): {:08b}", rx_buffer);
@@ -1075,7 +1075,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
             .unwrap();
         let bfpctrl_reg = self.read_register(MCP2515Register::BFPCTRL, 0x00).unwrap();
 
-        /* The requested mode must be varified by reading the OPMOD[2:0] bits
+        /* The requested mode must be verified by reading the OPMOD[2:0] bits
          * (CANSTAT[7:5]) */
         let canstat_new = self.read_register(MCP2515Register::CANSTAT, 0x00).unwrap();
         defmt::println!("CANSTAT after reset instruction is: {:08b}", canstat_reg);
@@ -1174,7 +1174,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
         // If
         debug_assert!(
             mask & filter == filter,
-            "Mask will be atleast partially cancled by the filter"
+            "Mask will be at least partially canceled by the filter"
         );
         debug_assert!((filter >> 5) < 1 << 11, "Filter must be an 11 bit integer");
         debug_assert!((mask >> 5) < 1 << 11, "Mask must be an 11 bit integer");
@@ -1364,7 +1364,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
 
     /// This would parse the received interrupt, triggered by the GPIOTE
     /// channel. Pass the decoded interrupt from `interrupt_decode()` and
-    /// handle it. E.g., clear neccessary regs such as clearing the
+    /// handle it. E.g., clear necessary regs such as clearing the
     /// appropriate CANINTF bits.
     ///
     /// ## NOTE
@@ -1386,7 +1386,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
         match received_interrupt {
             InterruptFlagCode::NoInterrupt => {
                 if (canintf & (1 << 7) != 0) {
-                    defmt::info!("Message Error Interrupt occured (MERRE)!");
+                    defmt::info!("Message Error Interrupt occurred (MERRE)!");
                     defmt::println!("CANINTF register bits: {:08b}", canintf);
                     self.clear_interrupt_flag(7);
                     let all_handled = self.interrupt_is_cleared();
@@ -1403,7 +1403,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
                 self.clear_interrupt_flag(5);
             }
             InterruptFlagCode::WakeUpInterrupt => {
-                defmt::println!("Wakeup interrupt occured!");
+                defmt::println!("Wakeup interrupt occurred!");
             }
             InterruptFlagCode::TXB0Interrupt => {
                 defmt::println!("TXB0 successfully transmitted a message!");
