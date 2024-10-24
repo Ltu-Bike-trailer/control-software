@@ -3,7 +3,6 @@
 //! ## Note
 //!
 //! This driver, is still under progress...
-//!
 #![no_main]
 #![no_std]
 #![allow(unused)]
@@ -262,6 +261,7 @@ pub enum DriverError {
 /// Associated registers to a specific TX/RX buffer. Going from high to low
 /// addresses offsets.
 #[repr(u8)]
+#[allow(clippy::upper_case_acronyms)]
 enum TxRxbn {
     /// TXBNCTRL/RXBNCTRL
     CTRL = 0x0,
@@ -477,9 +477,9 @@ impl Default for Mcp2515Settings {
 impl Mcp2515Settings {
     const DEFAULT_FILTER_MASK: u16 = 0u16;
     
-    /// Creates a new MCP2515Settings instance with specified settings.
+    /// Creates a new `MCP2515Settings` instance with specified settings.
     #[must_use]
-    pub fn new(
+    pub const fn new(
         canctrl: SettingsCanCtrl,
         mcp_clk: McpClock,
         can_bitrate: Bitrate,
@@ -488,7 +488,15 @@ impl Mcp2515Settings {
         rx0_filtermask: AcceptanceFilterMask,
         rx1_filtermask: AcceptanceFilterMask,
     ) -> Self {
-        Self { canctrl, mcp_clk, can_bitrate, interrupts, rxm_mode, rx0_filtermask, rx1_filtermask}
+        Self { 
+            canctrl, 
+            mcp_clk, 
+            can_bitrate, 
+            interrupts, 
+            rxm_mode, 
+            rx0_filtermask, 
+            rx1_filtermask
+        }
     }
 
     /// Enable interrupt in the MCP2515.CANINTE register.
@@ -786,9 +794,9 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
         self.load_tx_buffer(TXBN::TXB0, can_msg);
     }
 
-    /// The `blocking_rx` method was for reading the RX buffers for a loopback test
-    /// without interrupts.
-    fn blocking_rx(&mut self, rx: &RXBN) {
+    /// The `blocking_rx` method was for reading the RX buffers for a loopback 
+    /// test without interrupts.
+    fn blocking_rx(&mut self, rx: RXBN) {
         loop {
             let rx_status = self.read_register(MCP2515Register::CANINTF, 0x00).unwrap();
             match rx {
