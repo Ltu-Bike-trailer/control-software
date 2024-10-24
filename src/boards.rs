@@ -40,6 +40,7 @@ impl PinMapping<false, false> {
         let cs = p1.p1_08.into_push_pull_output(gpio::Level::High).degrade();
         let can_interrupt = p1.p1_06.into_floating_input().degrade();
 
+
         let spi_pins = SpiPins { mosi, miso, sck };
 
         Self {
