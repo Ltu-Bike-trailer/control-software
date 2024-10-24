@@ -100,9 +100,9 @@ impl CanMessage {
         //TODO: - Replace with:
         let full_standardid_as_u16 = raw_id << 5;
 
-        let sidh = (raw_id >> 3) as u8; // Most significant byte
-        let sidl = (raw_id as u8 & 0x07) << 5; // Least significant byte, 0x07 = 00000_0111
-        let combined = ((u16::from(sidh)) << 8) | u16::from(sidl);
+        let sid_high = (raw_id >> 3) as u8; // Most significant byte
+        let sid_low = (raw_id as u8 & 0x07) << 5; // Least significant byte, 0x07 = 00000_0111
+        let combined = ((u16::from(sid_high)) << 8) | u16::from(sid_low);
         full_standardid_as_u16
     }
 
@@ -150,7 +150,7 @@ impl CanMessage {
 
         let data_start = 5_usize;
         let data_end = data_start + self.dlc();
-        
+
         byte_frame[0..data_start].copy_from_slice(&[
             sid_high,
             sid_low,
@@ -162,7 +162,6 @@ impl CanMessage {
         byte_frame[data_start..data_end].copy_from_slice(&self.data[0..self.dlc()]);
         byte_frame
     }
-
 }
 
 ///This From trait would parse a type T into a `CanMessage` frame.
