@@ -134,15 +134,7 @@ mod app {
             OSM,
         );
 
-        let can_settings = Mcp2515Settings {
-            canctrl: canctrl_settings,
-            mcp_clk: McpClock::MCP8,
-            can_bitrate: Bitrate::CAN125,
-            interrupts: 0u8,
-            rxm_mode: ReceiveBufferMode::OnlyStandardId,
-            rx0_filtermask: AcceptanceFilterMask::new(MASK_RXN, FILTER_RX0),
-            rx1_filtermask: AcceptanceFilterMask::new(MASK_RXN, FILTER_RX1),
-        };
+        let can_settings = Mcp2515Settings::new(canctrl_settings, McpClock::MCP8, Bitrate::CAN125, 0u8, ReceiveBufferMode::OnlyStandardId, AcceptanceFilterMask::new(MASK_RXN, FILTER_RX0), AcceptanceFilterMask::new(MASK_RXN, FILTER_RX1));
 
         let mut can_driver = Mcp2515Driver::init(spi, cs_pin, can_interrupt, can_settings);
         let mut can_node =
