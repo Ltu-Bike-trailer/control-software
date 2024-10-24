@@ -55,7 +55,6 @@ impl Frame for CanMessage {
     }
 
     fn id(&self) -> embedded_can::Id {
-        //embedded_can::Id::Standard((StandardId::ZERO));
         self.id
     }
 
@@ -104,9 +103,6 @@ impl CanMessage {
         let sidh = (raw_id >> 3) as u8; // Most significant byte
         let sidl = (raw_id as u8 & 0x07) << 5; // Least significant byte, 0x07 = 00000_0111
         let combined = ((u16::from(sidh)) << 8) | u16::from(sidl);
-        //defmt::info!("sidh: {:08b}, sidl: {:08b}, 11bit ID: {:016b}", sidh, sidl,
-        // combined); defmt::info!("full_standardid_as_u16: {:016b}",
-        // full_standardid_as_u16);
         full_standardid_as_u16
     }
 
@@ -152,18 +148,9 @@ impl CanMessage {
         let extended_id8: u8 = 0;
         let extended_id0: u8 = 0;
 
-        /*
-        defmt::println!("to_bytes: \nSIDH: {:08b}\nSIDL: {:08b}\nEID8: {:08b}\nEID0: {:08b}",
-            sidh, sidl, extended_id8, extended_id0);
-        */
         let data_start = 5_usize;
         let data_end = data_start + self.dlc();
-        //defmt::info!("Inside to_bytes logic, dlc: {:08b}", self.dlc());
-        /*
-        byte_frame = [sidh, sidl, extended_id8, extended_id0, self.dlc() as u8,
-            self.data[0], self.data[1], self.data[2], self.data[3], self.data[4],
-            self.data[5], self.data[6], self.data[7]];
-        */
+        
         byte_frame[0..data_start].copy_from_slice(&[
             sid_high,
             sid_low,
@@ -171,21 +158,11 @@ impl CanMessage {
             extended_id0,
             self.dlc() as u8,
         ]);
+
         byte_frame[data_start..data_end].copy_from_slice(&self.data[0..self.dlc()]);
-
-        //defmt::info!("In to_bytes logic, self.data() contains: {:08b}", self.data());
-        //defmt::info!("In to_bytes logic, self.data() vs self.data field: {:08b}",
-        // self.data);
-
         byte_frame
     }
 
-    /*
-    pub fn data_to_string(data: &[u8]) -> &str{
-        let data_str = str::from_utf8(&data).unwrap();
-        data_str
-    }
-    */
 }
 
 ///This From trait would parse a type T into a `CanMessage` frame.
@@ -194,7 +171,6 @@ impl TryFrom<[u8; 13]> for CanMessage {
 
     #[allow(clippy::cast_possible_truncation)]
     fn try_from(value: [u8; 13]) -> Result<Self, Self::Error> {
-        //let mut data = [0u8; 8];
         let mut id_bytes: [u8; 2];
         let mut raw_id: u16 = 0u16;
 
@@ -204,23 +180,13 @@ impl TryFrom<[u8; 13]> for CanMessage {
 
         let data_start = 5_usize;
         let data_end = data_start + dlc as usize;
-        //defmt::info!("dlc: {:?}", dlc);
-
-        //defmt::info!("data range: {:?}:{:?}", data_start, data_end);
 
         let mut data = &value[data_start..];
 
-        //data[0..].copy_from_slice(&byte_data[5..]);
         // Shift MSB u16 SIDH part and OR the LSB u16 SIDL part
         raw_id = ((slice_sid_high << 3) + (slice_sid_low >> 5));
 
-        //let sidh = (raw_id >> 3) as u8;  // Most significant byte
-        //let sidl = (raw_id as u8 & 0x07) << 5;  // Least significant byte, 0x07 =
-        // 00000_0111 let combined = (((slice_sidh) << 8) | (slice_sidl)) >> 5;
-        // //
-
         let frame_id = StandardId::new(raw_id).ok_or("Invalid ID: out of 11-bit range")?;
-        //Self::new(embedded_can::Id::Standard(frame_id), data).unwrap();
         Self::new(embedded_can::Id::Standard(frame_id), data)
             .ok_or("Failed to create CanMessage frame")
     }
