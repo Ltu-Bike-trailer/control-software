@@ -774,7 +774,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
     /// (1). Change mode by writing to CANCTRL register with the settings
     /// bitmask. (2). Create a new CAN frame and convert to byte array.
     /// (3). Perform 'Load TX buffer' instruction, loading the CAN byte frame.
-    /// (4). Initiate transmission by setting the TXREQ bit (`TXBnCTRL`[3])
+    /// (4). Initiate transmission by setting the TXREQ bit (`TXBnCTRL`(3))
     /// for each buffer. (5). Poll the target RX buffer, checking if message
     /// has been received. Then read RX!
     /// -------------------------------------------------------------------------*    
