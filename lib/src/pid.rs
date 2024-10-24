@@ -1,5 +1,7 @@
 //! Defines a PID controller.
 
+#![allow(clippy::module_name_repetitions)]
+
 use core::{
     convert::Infallible,
     fmt::Debug,
@@ -8,7 +10,6 @@ use core::{
 };
 
 use arraydeque::ArrayDeque;
-use sealed::{CmpExt, Convert};
 
 /// Provides a light weight interface for setting the output of a value
 pub trait Channel<Error: Debug> {
@@ -18,13 +19,14 @@ pub trait Channel<Error: Debug> {
     ///
     /// # Errors
     ///
-    /// May return an error if the underlying hardware returns an error.
+    /// Returns an error if there is some underlying issue.
+    /// See specific implementations for details.
     fn set(&mut self, value: Self::Output) -> Result<(), Error>;
 }
 
-/// Denotes that a type can be double in size.
+/// Represents that a type can be doubled in size.
 ///
-/// This is used for our fixed point arithemetics.
+/// This is trivially true for all of the types it is implemented on.
 pub trait DoubleSize {
     /// A type with double the size of self.
     type Ret: Sized;
@@ -84,7 +86,7 @@ pub struct Pid<
 }
 
 /// This assumes that we have a i32 as data.
-pub struct Dynamic<
+pub struct PidDynamic<
     Error: Debug,
     Interface: Channel<Error>,
     Output: Sized,
@@ -108,8 +110,8 @@ pub struct Dynamic<
 }
 
 /// Wraps the info about a specific time step in the control sequence.
-#[derive(Debug, defmt::Format)]
-pub struct ControlInfo<Output: Sized> {
+#[derive(Debug)]
+pub struct ControlInfo<Output: Sized + defmt::Format> {
     /// The expected value.
     pub reference: Output,
     /// The actual value read from the [`Channel`].
@@ -205,8 +207,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns an error if the underlying actuation channel returns an error.
-    /// Or if the PID computations return an error.
+    /// This function returns an error if the underlying [`Channel`] fails or
+    /// any numeric conversions fail.
     pub fn actuate_rate_limited(
         &mut self,
         rate_limit: Output,
@@ -240,8 +242,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns an error if the underlying actuation channel returns an error.
-    /// Or if the PID computations return an error.
+    /// This function returns an error if the underlying [`Channel`] fails or
+    /// any numeric conversions fail.
     pub fn actuate(
         &mut self,
     ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>>
@@ -259,6 +261,12 @@ where
         Ok(output)
     }
 
+    /// Computes the latest control output.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the underlying [`Channel`] fails or
+    /// any numeric conversions fail.
     fn compute_output(
         &mut self,
     ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>> {
@@ -332,7 +340,7 @@ impl<
         const TIMESCALE: i32,
         const FIXED_POINT: u32,
     >
-    Dynamic<
+    PidDynamic<
         Error,
         Interface,
         Output,
@@ -396,8 +404,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns an error if the underlying actuation channel returns an error.
-    /// Or if the PID computations return an error.
+    /// This errors if any of the numeric conversions fail or the [`Channel`]
+    /// fails.
     pub fn actuate_rate_limited(
         &mut self,
         rate_limit: Output,
@@ -432,8 +440,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns an error if the underlying actuation channel returns an error.
-    /// Or if the PID computations return an error.
+    /// This errors if any of the numeric conversions fail or the [`Channel`]
+    /// fails.
     pub fn actuate(
         &mut self,
         ts: u64,
@@ -452,6 +460,12 @@ where
         Ok(output)
     }
 
+    /// Computes the desired output for the latest set of measurements and
+    /// reference signals.
+    ///
+    /// # Errors
+    ///
+    /// If any numeric conversions fail.
     fn compute_output(
         &mut self,
         ts: u64,
@@ -520,11 +534,11 @@ where
 /// Syntax :
 ///
 /// ```rust
-///   use shared::controller::prelude::*;
+///   use lib::pid::prelude::*;
 ///   // Note that the channel here is probably some output thing, esc, servo etc.
 ///   let channel = 0f32;
 ///   let target = [6f32, 6f32];
-///   let mut pid = pid!(
+///   let mut pid = new_pid!(
 ///     buffer_size:2, // This is optional, leaving it out will generate a buffer of size 1.
 ///     kp:2,
 ///     ki:1,
@@ -550,7 +564,8 @@ where
 ///   // Accumulated sum + average from previous time step to the current time step.
 ///   assert!(actuation.actuation == expected);
 /// ```
-macro_rules! pid {
+#[allow(clippy::module_name_repetitions)]
+macro_rules! new_pid {
     (
         buffer_size:
         $buffer:literal,kp:
@@ -586,7 +601,7 @@ macro_rules! pid {
     }};
 }
 
-/// Re-exports everything needed to use the [`Pid`] controller.
+/// Re-exports all of the needed parts of a PID controller.
 pub mod prelude {
 
     impl Channel<()> for f32 {
@@ -598,7 +613,7 @@ pub mod prelude {
         }
     }
     pub use super::{Channel, Pid};
-    pub use crate::pid;
+    pub use crate::new_pid;
 }
 
 mod sealed {
@@ -622,7 +637,6 @@ mod sealed {
         }
     }
 
-    #[allow(clippy::cast_possible_truncation)]
     impl Convert<i32> for u64 {
         type Error = Infallible;
 
@@ -631,7 +645,6 @@ mod sealed {
         }
     }
 
-    #[allow(clippy::cast_precision_loss)]
     impl Convert<f32> for u64 {
         type Error = Infallible;
 
@@ -639,7 +652,7 @@ mod sealed {
             Ok(self as f32)
         }
     }
-    #[allow(clippy::cast_precision_loss)]
+
     impl Convert<f32> for i32 {
         type Error = Infallible;
 
@@ -652,19 +665,19 @@ mod sealed {
         where
             Self: PartialOrd<Self> + Sized,
         {
-            if self < other {
-                return other;
+            match self > other {
+                true => self,
+                false => other,
             }
-            self
         }
         fn min(self, other: Self) -> Self
         where
             Self: PartialOrd<Self> + Sized,
         {
-            if self >= other {
-                return other;
+            match self < other {
+                true => self,
+                false => other,
             }
-            self
         }
     }
 
@@ -685,6 +698,7 @@ mod sealed {
         }
     }
 }
+use sealed::{CmpExt, Convert};
 
 impl DoubleSize for i32 {
     type Error = ();
@@ -710,11 +724,231 @@ impl DoubleSize for f32 {
         self.into()
     }
 
-    #[allow(clippy::cast_possible_truncation)]
     fn half_size(value: Self::Ret) -> Result<Self, Self::Error>
     where
         Self: Sized,
     {
         Ok(value as Self)
+    }
+}
+
+#[cfg(feature = "std")]
+#[cfg(test)]
+mod test {
+    use super::prelude::*;
+
+    impl<Iter: Iterator<Item = i32>> Channel<()> for (Iter, i32) {
+        type Output = i32;
+
+        fn set(&mut self, value: i32) -> Result<(), ()> {
+            self.1 = value;
+            Ok(())
+        }
+    }
+
+    impl Channel<()> for i32 {
+        type Output = f32;
+
+        fn set(&mut self, value: f32) -> Result<(), ()> {
+            *self = value as i32;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_p() {
+        let channel = ([1, 2, 3, 5, 6].into_iter(), 0);
+        let target = [6, 6, 6, 6, 6];
+        let mut pid: Pid<_, _, _, 5, 2, 0, 0, 1, 100, 0, 1, 0> = Pid::new(channel);
+        pid.follow(target);
+
+        while let Ok(actuation) = pid.actuate() {
+            assert!(actuation.actuation == 2 * (actuation.reference - actuation.measured));
+        }
+    }
+
+    #[test]
+    fn test_pi() {
+        let channel = ([1, 2].into_iter(), 0);
+        let target = [6, 6];
+        let mut pid: Pid<(), _, i32, 2, 2, 1, 0, 1, 100, 0, 1, 0> = Pid::new(channel);
+        pid.follow(target);
+
+        pid.register_measurement(1, 0);
+        let actuation = pid.actuate().unwrap();
+        assert!(actuation.actuation == 2 * (actuation.reference - actuation.measured) + 5 / 2);
+
+        pid.register_measurement(2, 1);
+        let actuation = pid.actuate().unwrap();
+        // Accumulated sum + average from previous time step to the current time step.
+        assert!(
+            actuation.actuation == 2 * (actuation.reference - actuation.measured) + (5 + 4) / 2 + 2
+        );
+    }
+
+    #[test]
+    fn test_pid() {
+        let channel = ([1, 2].into_iter(), 0);
+        let target = [6, 6];
+        let mut pid: Pid<(), _, i32, 2, 2, 1, 1, 1, 100, 0, 1, 0> = Pid::new(channel);
+        pid.follow(target);
+
+        pid.register_measurement(1, 0);
+        let actuation = pid.actuate().unwrap();
+        assert!(actuation.actuation == 2 * (actuation.reference - actuation.measured) + 5 / 2 + 5);
+
+        pid.register_measurement(2, 1);
+        let actuation = pid.actuate().unwrap();
+        // Accumulated sum + average from previous time step to the current time step.
+        assert!(
+            actuation.actuation
+                == 2 * (actuation.reference - actuation.measured) + (5 + 4) / 2 + 2 - 1
+        );
+    }
+
+    // #[allow(non_snake_case)]
+    // /// A collection of PID parameters.
+    // pub struct PidParams {
+    //     /// The proportional error coefficient.
+    //     pub KP: i32,
+    //     /// The integral of error coefficient.
+    //     pub KI: i32,
+    //     /// The derivative of error coefficient.
+    //     pub KD: i32,
+    //     // 10 ^ 1
+    //     /// log 10 of scale.
+    //     pub SCALE: u32,
+    //
+    //     /// Sample time.
+    //     pub TS: i32,
+    //     /// Fraction of seconds, so uS => 10^6.
+    //     pub TIMESCALE: i32,
+    // }
+    //
+    // /// The PID parameters for the ESC.
+    // pub const ESC_PID_PARAMS: PidParams = PidParams {
+    //     KP: 23,
+    //     KI: 30,
+    //     KD: 31,
+    //     // 10^2
+    //     SCALE: 2,
+    //     TS: 50_000,
+    //     TIMESCALE: 1_000_000,
+    // };
+    //
+    // /// A wrapper around the [`Pid`] controller with predefined coefficients.
+    // pub type MotorController = Pid<
+    //     (),
+    //     i32,
+    //     f32,
+    //     100,
+    //     { ESC_PID_PARAMS.KP },
+    //     { ESC_PID_PARAMS.KI },
+    //     { ESC_PID_PARAMS.KD },
+    //     { ESC_PID_PARAMS.TS },
+    //     100,
+    //     -100,
+    //     { ESC_PID_PARAMS.TIMESCALE },
+    //     { ESC_PID_PARAMS.SCALE },
+    // >;
+    //
+    // #[test]
+    // fn test_pid_esc() {
+    //     let target = [100f32; 70].into_iter().chain([70f32; 30].into_iter());
+    //     let mut pid: MotorController = Pid::new(0i32);
+    //     pid.follow(target);
+    //
+    //     pid.register_measurement(1f32, 0);
+    //     let mut counter = 30;
+    //     while let Ok(actuation) = pid.actuate() {
+    //         counter += 1;
+    //         pid.register_measurement(counter as f32, 0);
+    //         println!("Actuation : {actuation:?}");
+    //     }
+    //     // assert!(actuation.actuation == 2 * (actuation.reference -
+    // actuation.measured) + 5 / 2 + 5);
+    //
+    //     pid.register_measurement(2f32, 1);
+    //     let actuation = pid.actuate().unwrap();
+    //     println!("First actuation : {actuation:?}");
+    //     // Accumulated sum + average from previous time step to the current time
+    // step.     // assert!(
+    //     //     actuation.actuation // == 2 * (actuation.reference -
+    // actuation.measured) + (5 + 4) / 2 + 2 - 1     // );
+    //     assert!(false);
+    // }
+
+    #[test]
+    fn test_pid_no_diff() {
+        let channel = ([0].into_iter(), 0);
+        let target = [0, 0];
+        let mut pid: Pid<(), _, i32, 2, 2, 1, 1, 1, 100, 0, 1, 0> = Pid::new(channel);
+        pid.follow(target);
+
+        pid.register_measurement(0, 0);
+        let actuation = pid.actuate().unwrap();
+        assert!(actuation.actuation == 0);
+
+        pid.register_measurement(0, 1);
+        let actuation = pid.actuate().unwrap();
+        // Accumulated sum + average from previous time step to the current time step.
+        assert!(actuation.actuation == 0);
+    }
+
+    #[test]
+    fn test_pid_fixed_point() {
+        let channel = ([1, 2].into_iter(), 0);
+        let target = [6, 6];
+        let mut pid: Pid<(), _, i32, 2, 21, 21, 11, 1, 100, 0, 1, 1> = Pid::new(channel);
+        pid.follow(target);
+
+        pid.register_measurement(1, 0);
+        let actuation = pid.actuate().unwrap();
+        let expected =
+            (21 * (actuation.reference - actuation.measured) + 21 * (5 / 2) + 11 * 5) / 10;
+        println!("Actuation : {:?} == {expected:?}", actuation);
+        assert!(actuation.actuation == expected);
+
+        pid.register_measurement(2, 1);
+        let actuation = pid.actuate().unwrap();
+        let expected =
+            (21 * (actuation.reference - actuation.measured) + 21 * ((5 + 4) / 2) + 11 * 2) / 10;
+        println!("Actuation : {:?} == {expected:?}", actuation);
+        // Accumulated sum + average from previous time step to the current time step.
+        assert!(actuation.actuation == expected);
+    }
+
+    #[test]
+    fn test_pid_float() {
+        let channel = 0f32;
+        let target = [6f32, 6f32];
+        let mut pid = new_pid!(
+            buffer_size:2,
+            kp:2,
+            ki:1,
+            kd:1,
+            sample_time:1,
+            threshold_max:100,
+            threshold_min:0,
+            time_scale:1,
+            fixed_point:0,
+            output:channel
+        );
+        pid.follow(target);
+
+        pid.register_measurement(1f32, 0);
+        let actuation = pid.actuate().unwrap();
+        let expected = 2f32 * (actuation.reference - actuation.measured) + 5f32 / 2f32 + 5f32;
+        println!("Actuation : {:?} == {expected:?}", actuation);
+        assert!(actuation.actuation == expected);
+
+        pid.register_measurement(2f32, 1);
+        let actuation = pid.actuate().unwrap();
+        let expected =
+            2f32 * (actuation.reference - actuation.measured) + (5f32 + 4f32) / 2f32 + 2.5f32
+                - 1f32;
+        println!("Actuation : {:?} == {expected:?}", actuation);
+        // Accumulated sum + average from previous time step to the current time step.
+        assert!(actuation.actuation == expected);
     }
 }

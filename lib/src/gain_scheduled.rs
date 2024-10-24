@@ -1,11 +1,9 @@
 //! Defines a gain scheduling PID controller.
 use core::{fmt::Debug, marker::PhantomData};
 
-use defmt::info;
-
 use crate::pid::{Channel, ControlInfo};
 
-/// Denotes that a structure can be used as a set of PID parameters.
+/// A set of PID parameters.
 pub trait PidParams<const FIXED_POINT: u32>: Copy {
     /// Returns the proportional gain.
     fn get_kp(&self) -> i32;
@@ -16,32 +14,32 @@ pub trait PidParams<const FIXED_POINT: u32>: Copy {
     /// Returns the derivative gain.
     fn get_kd(&self) -> i32;
 
-    /// Returns the lower bound for this parameter set.
+    /// Returns the lower bound of the parameters.
     fn get_min(&self) -> f32;
 
-    /// Returns the upper bound for this parameter set.
+    /// Returns the upper bound of the parameters.
     fn get_max(&self) -> f32;
 }
 
-/// A simple set of PID parameters.
 #[derive(Copy, Clone)]
+/// An example of valid PID parameters valid up until the `max_value`.
 pub struct GainParams<const FIXED_POINT: u32> {
-    /// Proportional gain.
+    /// The proportional gain.
     pub kp: i32,
-    /// Integral gain.
+    /// The integral gain.
     pub ki: i32,
-    /// Derivative gain.
+    /// The derivative gain.
     pub kd: i32,
-    /// Upper bound for these parameters.
+    /// The upper bound.
     pub max_value: f32,
-    /// Lower bound for these parameters.
+    /// The lower bound.
     pub min_value: f32,
 }
 
-/// A gain scheduled PID controller.
+/// Provides a simple gain scheduled controller.
 ///
-/// This means that given a set of [`PidParams`] it will adapt its gain
-/// values depending on the measurement.
+/// This controller allows changing parameters based on some signal set via
+/// [`GainScheduler::set_bucket`].
 pub struct GainScheduler<
     Error: Debug,
     Interface: Channel<Error, Output = f32>,
@@ -112,14 +110,19 @@ impl<
     /// Creates a new controller that sets the output on the
     /// [`Interface`](`Channel`) using a PID control strategy.
     ///
+    ///
     /// # Panics
     ///
-    /// Panics if the regions are not provided in order.
+    /// This function panics if the gain regions are not provided in ascending
+    /// order.
     pub fn new(channel: Interface, params: [ParamsStore; REGIONS]) -> Self {
         let mut index_map = [(0., 0); REGIONS];
         let mut prev_thresh = f32::MIN;
         for (idx, el) in params.iter().enumerate() {
-            assert!(el.get_min() <= prev_thresh);
+            debug_assert!(
+                el.get_min() <= prev_thresh,
+                "Gain regions must be provided in ascending order"
+            );
             prev_thresh = el.get_min();
             index_map[idx] = (prev_thresh, idx);
         }
@@ -140,19 +143,17 @@ impl<
         }
     }
 
-    /// Registers a new reference value to follow.
+    /// Sets the reference value to follow.
     pub fn follow(&mut self, reference: f32) {
         self.reference = reference;
     }
 
-    /// Sets the gain region used.
+    /// Sets the current bucket bucket or schedule to use.
     pub fn set_bucket(&mut self, bucketer: f32) {
         self.bucketer = bucketer;
     }
 
-    /// Registers a new measurement.
-    ///
-    /// Composed of a (measurement, and a timestamp).
+    /// Registers a new timestamped measurement.
     pub fn register_measurement(&mut self, measurement: (f32, u64)) {
         self.prev_time = self.measurement.1;
         self.measurement = measurement;
@@ -164,7 +165,6 @@ impl<
 
         for (idx, (lower_bound, _target_idx)) in self.index_map.iter().enumerate() {
             if self.bucketer > *lower_bound * 1.05 {
-                info!("IDX : {:?}", idx);
                 min_idx = idx;
             } else {
                 break;
@@ -175,8 +175,6 @@ impl<
             min_idx = self.prev_idx;
         }
 
-        info!("using idx : {:?}", min_idx);
-
         self.parameters[self.index_map[min_idx].1]
     }
 
@@ -186,11 +184,9 @@ impl<
     ///
     /// # Errors
     ///
-    /// This function may throw an error if the underlying [`Channel`]
-    /// throws an error.
+    /// This function returns an error if the [`Channel`] fails.
     pub fn actuate(&mut self) -> Result<ControlInfo<f32>, Error> {
         let output = self.compute_output();
-        info!("Applying {:?}", output);
 
         self.interface.set(output.actuation)?;
         self.previous_actuation = output.actuation;
@@ -198,12 +194,12 @@ impl<
         Ok(output)
     }
 
-    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
-    /// Computes the output using normal PID calculations.
+    /// Computes the controller output at the latest timestamped measurement.
     ///
     /// # Errors
     ///
-    /// This function can throw an error if the
+    /// This function returns an error if any of the underlying numeric
+    /// conversion fail.
     pub fn compute_output(&mut self) -> ControlInfo<f32> {
         let target: f32 = self.reference;
 
