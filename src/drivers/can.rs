@@ -1,12 +1,9 @@
 //! MCP2515 driver - for writing CAN frame messages over the CAN bus.
 //!
+//! ## Note
 //!
 //! This driver, is still under progress...
 //!
-//! ## Usage
-//!
-//! ```ignore
-//! ```
 #![no_main]
 #![no_std]
 #![allow(unused)]
