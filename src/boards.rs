@@ -9,7 +9,7 @@ use nrf52840_hal::{
 
 /// Wraps the pins needed for the SPI.
 pub struct SpiPins {
-    /// Incomming packets from the slave device.
+    /// Incoming packets from the slave device.
     pub mosi: Pin<Output<PushPull>>,
     /// Outgoing packets to slave device.
     pub miso: Pin<Input<Floating>>,
@@ -81,7 +81,7 @@ impl<const EVENTS_CONFIGURED: bool> PinMapping<false, EVENTS_CONFIGURED> {
     }
 }
 
-/// The final pin cluster retruned on consumption.
+/// The final pin cluster returned on consumption.
 pub type FinalPins = (Pin<Output<PushPull>>, Pin<Input<Floating>>);
 
 impl<const SPI_USED: bool> PinMapping<SPI_USED, true> {
