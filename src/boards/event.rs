@@ -14,7 +14,7 @@ pub struct Manager {
     pub(crate) gpiote: Gpiote,
 }
 
-/// Itterates over the generated events, and clears the previous one
+/// Iterates over the generated events, and clears the previous one
 /// automatically after each iteration
 pub struct Iter<'a> {
     idx: usize,
