@@ -115,19 +115,19 @@ impl CanMessage {
     }
 
     /// Maps a CAN message to a byte sequence.
-    /// [0] = SIDH
-    /// [1] = SIDL
-    /// [2] = EID8
-    /// [3] = EID0
-    /// [4] = DLC
-    /// [5] = D0
-    /// [6] = D1
-    /// [7] = D2
-    /// [8] = D3
-    /// [9] = D4
-    /// [10] = D5
-    /// [11] = D6
-    /// [12] = D7
+    /// 0 => SIDH
+    /// 1 => SIDL
+    /// 2 => EID8
+    /// 3 => EID0
+    /// 4 => DLC
+    /// 5 => D0
+    /// 6 => D1
+    /// 7 => D2
+    /// 8 => D3
+    /// 9 => D4
+    /// 10 => D5
+    /// 11 => D6
+    /// 12 => D7
     #[allow(clippy::cast_possible_truncation)]
     pub fn to_bytes(&mut self) -> [u8; 13] {
         let mut byte_frame: [u8; 13] = [0; 13];

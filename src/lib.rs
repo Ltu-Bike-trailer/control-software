@@ -20,6 +20,8 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use defmt_rtt as _;
 use panic_probe as _;
+pub mod boards;
+pub mod drivers;
 
 pub mod boards;
 pub mod drivers;
