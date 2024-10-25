@@ -476,7 +476,7 @@ impl Default for Mcp2515Settings {
 
 impl Mcp2515Settings {
     const DEFAULT_FILTER_MASK: u16 = 0u16;
-    
+
     /// Creates a new `MCP2515Settings` instance with specified settings.
     #[must_use]
     pub const fn new(
@@ -488,14 +488,14 @@ impl Mcp2515Settings {
         rx0_filtermask: AcceptanceFilterMask,
         rx1_filtermask: AcceptanceFilterMask,
     ) -> Self {
-        Self { 
-            canctrl, 
-            mcp_clk, 
-            can_bitrate, 
-            interrupts, 
-            rxm_mode, 
-            rx0_filtermask, 
-            rx1_filtermask
+        Self {
+            canctrl,
+            mcp_clk,
+            can_bitrate,
+            interrupts,
+            rxm_mode,
+            rx0_filtermask,
+            rx1_filtermask,
         }
     }
 
@@ -752,7 +752,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
     fn change_settings(&mut self, settings: Mcp2515Settings) {
         self.can_settings.canctrl = settings.canctrl;
         let bitmask_canctrl = self.get_canctrl_mask(self.can_settings.canctrl);
-        
+
         self.write_register(MCP2515Register::CANCTRL, bitmask_canctrl);
     }
 
@@ -794,7 +794,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
         self.load_tx_buffer(TXBN::TXB0, can_msg);
     }
 
-    /// The `blocking_rx` method was for reading the RX buffers for a loopback 
+    /// The `blocking_rx` method was for reading the RX buffers for a loopback
     /// test without interrupts.
     fn blocking_rx(&mut self, rx: RXBN) {
         loop {
@@ -1406,7 +1406,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
 
                 let rx_buffer = self.read_rx_buffer(RXBN::RXB1).unwrap();
                 let mut frame = CanMessage::try_from(rx_buffer).unwrap();
-                
+
                 frame.print_frame();
                 let data_str: &str = core::str::from_utf8(frame.data()).unwrap();
 
