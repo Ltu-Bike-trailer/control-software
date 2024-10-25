@@ -61,7 +61,7 @@ mod app {
 
     #[local]
     struct Local {
-        candriver: Mcp2515Driver<Spi<SPI1>, Pin<Output<PushPull>>, Pin<Input<PullUp>>>,
+        candriver: Mcp2515Driver<Spi<SPI0>, Pin<Output<PushPull>>, Pin<Input<PullUp>>>,
         candriver_node: Mcp2515Driver<Spi<SPI2>, Pin<Output<PushPull>>, Pin<Input<PullUp>>>,
     }
 
@@ -94,8 +94,8 @@ mod app {
         defmt::println!("Initialize the SPI instance, and CanDriver");
         let pins = nrf52840_hal::spi::Pins {
             sck: Some(port0.p0_05.into_push_pull_output(Level::Low).degrade()),
-            mosi: Some(port0.p0_06.into_push_pull_output(Level::Low).degrade()),
-            miso: Some(port0.p0_07.into_floating_input().degrade()),
+            mosi: Some(port0.p0_02.into_push_pull_output(Level::Low).degrade()),
+            miso: Some(port0.p0_28.into_floating_input().degrade()),
         };
 
         let pins_node = nrf52840_hal::spi::Pins {
@@ -105,12 +105,12 @@ mod app {
         };
 
         let cs_pin = port1.p1_02.into_push_pull_output(Level::High).degrade();
-        let can_interrupt = port1.p1_01.into_pullup_input().degrade();
+        let can_interrupt = port1.p1_15.into_pullup_input().degrade();
 
         let cs_node_pin = port1.p1_08.into_push_pull_output(Level::High).degrade();
         let can_node_interrupt = port1.p1_07.into_pullup_input().degrade();
 
-        let mut spi = Spi::new(device.SPI1, pins, Frequency::M1, MODE_0);
+        let mut spi = Spi::new(device.SPI0, pins, Frequency::M1, MODE_0);
         let mut spi_node = Spi::new(device.SPI2, pins_node, Frequency::M1, MODE_0);
         let mut gpiote = Gpiote::new(device.GPIOTE);
 
@@ -134,9 +134,18 @@ mod app {
             OSM,
         );
 
-        let can_settings = Mcp2515Settings::new(canctrl_settings, McpClock::MCP8, Bitrate::CAN125, 0u8, ReceiveBufferMode::OnlyStandardId, AcceptanceFilterMask::new(MASK_RXN, FILTER_RX0), AcceptanceFilterMask::new(MASK_RXN, FILTER_RX1));
+        let can_settings = Mcp2515Settings::new(
+            canctrl_settings, 
+            McpClock::MCP8, 
+            Bitrate::CAN125, 
+            0u8, 
+            ReceiveBufferMode::OnlyStandardId, 
+            AcceptanceFilterMask::new(MASK_RXN, FILTER_RX0), 
+            AcceptanceFilterMask::new(MASK_RXN, FILTER_RX1)
+        );
 
-        let mut can_driver = Mcp2515Driver::init(spi, cs_pin, can_interrupt, can_settings);
+        let mut can_driver = 
+            Mcp2515Driver::init(spi, cs_pin, can_interrupt, can_settings);
         let mut can_node =
             Mcp2515Driver::init(spi_node, cs_node_pin, can_node_interrupt, can_settings);
 

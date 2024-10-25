@@ -131,7 +131,6 @@ impl CanMessage {
     #[allow(clippy::cast_possible_truncation)]
     pub fn to_bytes(&mut self) -> [u8; 13] {
         let mut byte_frame: [u8; 13] = [0; 13];
-        let mut id_bytes: [u8; 2];
         let mut raw_id: u16;
 
         if let embedded_can::Id::Standard(id) = self.id {
