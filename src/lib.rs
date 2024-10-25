@@ -23,9 +23,6 @@ use panic_probe as _;
 pub mod boards;
 pub mod drivers;
 
-pub mod boards;
-pub mod drivers;
-
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message
 // this prevents the panic message being printed *twice* when `defmt::panic` is
 // invoked

@@ -48,7 +48,7 @@ impl Manager {
     }
 }
 
-impl<'a> Iterator for Iter<'a> {
+impl Iterator for Iter<'_> {
     type Item = GpioEvents;
 
     fn next(&mut self) -> Option<Self::Item> {
