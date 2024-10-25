@@ -15,11 +15,13 @@
     rust_2018_idioms,
     rust_2024_compatibility
 )]
-#![allow(clippy::manual_range_contains)]
+#![allow(clippy::manual_range_contains, clippy::single_match_else)]
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use defmt_rtt as _;
 use panic_probe as _;
+
+pub mod boards;
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message
 // this prevents the panic message being printed *twice* when `defmt::panic` is
