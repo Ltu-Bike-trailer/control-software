@@ -4,10 +4,12 @@
 //! [`Message identifier`](constants::Message) and a single f32.
 pub mod constants;
 pub mod sender;
+pub mod message;
 
 #[allow(clippy::enum_glob_use)]
 use constants::{InvalidMessageId, Message::*};
 use embedded_can::{Frame, Id};
+use message::CanMessage;
 
 /// Denotes all of the supported message types.
 #[derive(Clone, Debug)]
@@ -341,51 +343,51 @@ impl TryFrom<&CanMessage> for MessageType {
 
 impl Message<CanMessage> for MessageType {}
 
-/// A simple dummy `CanMessage`.
-pub struct CanMessage {
-    id: embedded_can::Id,
-    dlc: u8,       // Data length code = length of data field.
-    data: [u8; 8], // D7 - D0
-}
+///// A simple dummy `CanMessage`.
+//pub struct CanMessage {
+//    id: embedded_can::Id,
+//    dlc: u8,       // Data length code = length of data field.
+//    data: [u8; 8], // D7 - D0
+//}
 
-impl Frame for CanMessage {
-    fn new(id: impl Into<embedded_can::Id>, data: &[u8]) -> Option<Self> {
-        let mut buffer = [0; 8];
-        for (idx, el) in data.iter().enumerate() {
-            debug_assert!(idx < 8);
-            buffer[idx] = *el;
-        }
-        Some(Self {
-            id: id.into(),
-            dlc: data.len() as u8,
-            data: buffer,
-        })
-    }
-
-    fn new_remote(_id: impl Into<embedded_can::Id>, _dlc: usize) -> Option<Self> {
-        None
-    }
-
-    fn is_extended(&self) -> bool {
-        false
-    }
-
-    fn is_remote_frame(&self) -> bool {
-        false
-    }
-
-    fn id(&self) -> embedded_can::Id {
-        self.id
-    }
-
-    fn dlc(&self) -> usize {
-        self.dlc as usize
-    }
-
-    fn data(&self) -> &[u8] {
-        &self.data
-    }
-}
+//impl Frame for CanMessage {
+//    fn new(id: impl Into<embedded_can::Id>, data: &[u8]) -> Option<Self> {
+//        let mut buffer = [0; 8];
+//        for (idx, el) in data.iter().enumerate() {
+//            debug_assert!(idx < 8);
+//            buffer[idx] = *el;
+//        }
+//        Some(Self {
+//            id: id.into(),
+//            dlc: data.len() as u8,
+//            data: buffer,
+//        })
+//    }
+//
+//    fn new_remote(_id: impl Into<embedded_can::Id>, _dlc: usize) -> Option<Self> {
+//        None
+//    }
+//
+//    fn is_extended(&self) -> bool {
+//        false
+//    }
+//
+//    fn is_remote_frame(&self) -> bool {
+//        false
+//    }
+//
+//    fn id(&self) -> embedded_can::Id {
+//        self.id
+//    }
+//
+//    fn dlc(&self) -> usize {
+//        self.dlc as usize
+//    }
+//
+//    fn data(&self) -> &[u8] {
+//        &self.data
+//    }
+//}
 
 impl PartialOrd for MessageType {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
