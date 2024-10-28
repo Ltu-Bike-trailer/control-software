@@ -2,3 +2,4 @@
 
 pub mod can;
 pub mod message;
+pub mod hx711;
