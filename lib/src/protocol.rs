@@ -3,8 +3,8 @@
 //! This is a dead simple protocol a typical message is defined by a
 //! [`Message identifier`](constants::Message) and a single f32.
 pub mod constants;
-pub mod sender;
 pub mod message;
+pub mod sender;
 
 #[allow(clippy::enum_glob_use)]
 use constants::{InvalidMessageId, Message::*};
@@ -364,8 +364,8 @@ impl Message<CanMessage> for MessageType {}
 //        })
 //    }
 //
-//    fn new_remote(_id: impl Into<embedded_can::Id>, _dlc: usize) -> Option<Self> {
-//        None
+//    fn new_remote(_id: impl Into<embedded_can::Id>, _dlc: usize) ->
+// Option<Self> {        None
 //    }
 //
 //    fn is_extended(&self) -> bool {

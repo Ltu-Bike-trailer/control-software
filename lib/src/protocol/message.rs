@@ -6,6 +6,7 @@
 #![allow(unused)]
 
 use core::str;
+
 use defmt::{write, Format, Formatter};
 use embedded_can::{nb::Can, Error, Frame, StandardId};
 
