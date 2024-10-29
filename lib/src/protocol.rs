@@ -427,6 +427,7 @@ mod test {
     use embedded_can::Frame;
 
     use super::{
+        message::CanMessage,
         sender::Sender,
         BatteryStatus,
         FixedLogType,
@@ -436,7 +437,7 @@ mod test {
         VelocityInfo,
         WriteType,
     };
-    use crate::protocol::CanMessage;
+    //use crate::protocol::CanMessage;
 
     #[test]
     fn test_serialize() {
