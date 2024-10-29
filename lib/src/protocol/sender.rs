@@ -20,7 +20,7 @@ use super::{BatteryStatus, CanMessage, MessageType, MotorSubSystem, VelocityInfo
 /// use lib::protocol::{
 ///     MessageType,
 ///     sender::Sender,
-///     CanMessage
+///     message::CanMessage
 /// };
 ///
 /// let mut buffer = Sender::<10>::new();
@@ -59,7 +59,8 @@ use super::{BatteryStatus, CanMessage, MessageType, MotorSubSystem, VelocityInfo
 ///     sender::Sender,
 ///     SensorSubSystem,
 ///     VelocityInfo,
-///     WriteType,CanMessage
+///     WriteType,
+///     message::CanMessage
 /// };
 ///
 /// let to_test = [

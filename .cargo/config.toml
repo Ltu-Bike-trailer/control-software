@@ -1,13 +1,15 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 #TODO: Replace this with propper target.
+
 runner = "probe-rs run --chip nrf52840_xxAA"
+#runner = "arm-none-eabi-gdb -q -x openocd.gdb"
+
 rustflags = [
     "-C",
     "link-arg=--nmagic",
-    "-C",
-    "link-arg=-Tcustom_link.x",
-    "-C",
-    "link-arg=-Tdefmt.x",
+    "-C", "link-arg=-Tdefmt.x",
+     "-C", "link-arg=-Tlink.x",
+
 ]
 
 [build]
