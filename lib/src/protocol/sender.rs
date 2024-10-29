@@ -17,10 +17,10 @@ use super::{BatteryStatus, CanMessage, MessageType, MotorSubSystem, VelocityInfo
 ///
 /// ```
 /// use embedded_can::Frame;
+/// use message::CanMessage;
 /// use lib::protocol::{
 ///     MessageType,
-///     sender::Sender,
-///     CanMessage
+///     sender::Sender
 /// };
 ///
 /// let mut buffer = Sender::<10>::new();
