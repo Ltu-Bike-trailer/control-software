@@ -67,7 +67,6 @@ mod app {
     fn init(cx: init::Context) -> (Shared, Local) {
         defmt::info!("init");
         nrf52840_hal::Clocks::new(cx.device.CLOCK)
-            .enable_ext_hfosc()
             .start_lfclk();
         Mono::start(cx.device.RTC0);
 

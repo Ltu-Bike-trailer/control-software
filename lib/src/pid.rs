@@ -47,20 +47,18 @@ pub trait DoubleSize {
 
 /// Enumerates the error cases for the controller.
 #[derive(Debug)]
-pub enum ControllerError<Error: Debug, ConversionError: Debug> {
+pub enum ControllerError<Error: Debug> {
     /// User tried to use the controller before assigning a control sequence.
     BufferEmpty,
     /// The value written to the channel caused some error.
     ChannelError(Error),
-    /// Thrown when a conversion is non successful.
-    ConversionError(ConversionError),
     /// Value to large.
     ///
     /// This is thrown when a value is to large to fit in half the size.
     ValueToLarge,
 
     /// Multiplication resulted in overflow
-    MultiplicationOverflow
+    MultiplicationOverflow,
 }
 
 /// This assumes that we have a i32 as data.
@@ -68,7 +66,6 @@ pub struct Pid<
     Error: Debug,
     Interface: Channel<Error>,
     Output: Sized,
-    const BUFFER: usize,
     const KP: i32,
     const KI: i32,
     const KD: i32,
@@ -80,7 +77,7 @@ pub struct Pid<
 > {
     err: PhantomData<Error>,
     out: Interface,
-    reference: ArrayDeque<Output, BUFFER>,
+    reference: Output,
     previous: Output,
     // This might need to be changed in to i64 to not cause errors.
     integral: Output,
@@ -135,8 +132,6 @@ impl<
         Error: Debug,
         Interface: Channel<Error, Output = Output>,
         Output: Sized,
-        ConversionError: Debug,
-        const BUFFER: usize,
         const KP: i32,
         const KI: i32,
         const KD: i32,
@@ -150,7 +145,6 @@ impl<
         Error,
         Interface,
         Output,
-        BUFFER,
         KP,
         KI,
         KD,
@@ -172,7 +166,7 @@ where
         + PartialOrd
         + CmpExt,
     Output::Ret: Add<Output::Ret, Output = Output::Ret> + Div<Output::Ret, Output = Output::Ret>,
-    i32: Convert<Output, Error = ConversionError>,
+    i32: Convert<Output>,
 {
     /// Creates a new controller that sets the output on the
     /// [`Interface`](`Channel`) using a PID control strategy.
@@ -180,7 +174,7 @@ where
         Self {
             out: channel,
             err: PhantomData,
-            reference: ArrayDeque::new(),
+            reference: Output::default(),
             previous: Output::default(),
             integral: Output::default(),
             measurement: (0, Output::default()),
@@ -189,14 +183,8 @@ where
     }
 
     /// Completely erases previous control signals.
-    pub fn follow<I: IntoIterator<Item = Output>>(&mut self, values: I) {
-        self.reference.clear();
-        self.reference.extend(values);
-    }
-
-    /// Extends the reference signal with new values.
-    pub fn extend<I: IntoIterator<Item = Output>>(&mut self, values: I) {
-        self.reference.extend(values);
+    pub fn follow(&mut self, values: Output) {
+        self.reference = values;
     }
 
     /// Registers the most recent measurement.
@@ -212,49 +200,12 @@ where
     ///
     /// This function returns an error if the underlying [`Channel`] fails or
     /// any numeric conversions fail.
-    pub fn actuate_rate_limited(
-        &mut self,
-        rate_limit: Output,
-    ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>>
+    pub fn actuate(&mut self) -> Result<ControlInfo<Output>, ControllerError<Error>>
     where
         <Output as DoubleSize>::Ret: Debug + Copy,
         Output: Debug + Copy,
     {
-        let mut output_pre_rate_limit = self.compute_output()?;
-
-        let output = match (
-            output_pre_rate_limit.actuation > (self.previous_actuation + rate_limit),
-            output_pre_rate_limit.actuation < (self.previous_actuation - rate_limit),
-        ) {
-            (true, _) => self.previous_actuation + rate_limit,
-            (_, true) => self.previous_actuation - rate_limit,
-            (_, _) => output_pre_rate_limit.actuation,
-        };
-
-        self.out
-            .set(output)
-            .map_err(|err| ControllerError::ChannelError(err))?;
-        self.previous_actuation = output;
-        output_pre_rate_limit.actuation = output;
-        Ok(output_pre_rate_limit)
-    }
-
-    /// Computes the control signal using a PID control strategy.
-    ///
-    /// if successful it returns the expected value and the read value.
-    ///
-    /// # Errors
-    ///
-    /// This function returns an error if the underlying [`Channel`] fails or
-    /// any numeric conversions fail.
-    pub fn actuate(
-        &mut self,
-    ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>>
-    where
-        <Output as DoubleSize>::Ret: Debug + Copy,
-        Output: Debug + Copy,
-    {
-        let output = self.compute_output()?;
+        let output = self.compute_output();
 
         self.out
             .set(output.actuation)
@@ -270,25 +221,20 @@ where
     ///
     /// This function returns an error if the underlying [`Channel`] fails or
     /// any numeric conversions fail.
-    fn compute_output(
-        &mut self,
-    ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>> {
-        let target: Output = match self.reference.pop_front() {
-            Some(value) => value,
-            None => return Err(ControllerError::BufferEmpty),
-        };
+    fn compute_output(&mut self) -> ControlInfo<Output> {
+        let target: Output = self.reference.clone();
 
-        let kp: Output = KP.convert()?;
-        let ki: Output = KI.convert()?;
-        let kd: Output = KD.convert()?;
+        let kp: Output = KP.convert();
+        let ki: Output = KI.convert();
+        let kd: Output = KD.convert();
 
-        let time_scale: Output = TIMESCALE.convert()?;
-        let ts: Output = TS.convert()?;
+        let time_scale: Output = TIMESCALE.convert();
+        let ts: Output = TS.convert();
 
-        let threshold_min = THRESHOLD_MIN.convert()?;
-        let threshold_max = THRESHOLD_MAX.convert()?;
+        let threshold_min = THRESHOLD_MIN.convert();
+        let threshold_max = THRESHOLD_MAX.convert();
 
-        let fixed_point = { 10i32.pow(FIXED_POINT) }.convert()?;
+        let fixed_point = { 10i32.pow(FIXED_POINT) }.convert();
 
         let actual: Output = self.measurement.1;
 
@@ -298,11 +244,13 @@ where
 
         // Integral is approximated as a sum of discrete signals.
         let avg: Output::Ret = self.previous.double_size() + error.double_size();
-        let two: Output = 2.convert()?;
+        let two: Output = 2.convert();
         let two = two.double_size();
-        self.integral +=
-            (Output::half_size(avg / two).map_err(|_| ControllerError::ValueToLarge)?) * ts
-                / time_scale;
+        if let Ok(val) = Output::half_size(avg / two) {
+            self.integral += val * ts / time_scale;
+        } else {
+            self.integral = Output::default();
+        }
 
         self.integral = self.integral.max(threshold_min).min(threshold_max);
 
@@ -317,7 +265,7 @@ where
             .max(threshold_min)
             .min(threshold_max);
 
-        Ok(ControlInfo {
+        ControlInfo {
             reference: target,
             measured: actual,
             actuation: output,
@@ -325,7 +273,7 @@ where
             i,
             d,
             pre_threshold: (p + i + d) / fixed_point,
-        })
+        }
     }
 }
 
@@ -333,7 +281,6 @@ impl<
         Error: Debug,
         Interface: Channel<Error, Output = Output>,
         Output: Sized,
-        ConversionError: Debug,
         const BUFFER: usize,
         const KP: i32,
         const KI: i32,
@@ -368,8 +315,8 @@ where
         + PartialOrd
         + CmpExt,
     Output::Ret: Add<Output::Ret, Output = Output::Ret> + Div<Output::Ret, Output = Output::Ret>,
-    i32: Convert<Output, Error = ConversionError>,
-    u64: Convert<Output, Error = ConversionError>,
+    i32: Convert<Output>,
+    u64: Convert<Output>,
 {
     /// Creates a new controller that sets the output on the
     /// [`Interface`](`Channel`) using a PID control strategy.
@@ -413,7 +360,7 @@ where
         &mut self,
         rate_limit: Output,
         ts: u64,
-    ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>>
+    ) -> Result<ControlInfo<Output>, ControllerError<Error>>
     where
         <Output as DoubleSize>::Ret: Debug + Copy,
         Output: Debug + Copy,
@@ -445,10 +392,7 @@ where
     ///
     /// This errors if any of the numeric conversions fail or the [`Channel`]
     /// fails.
-    pub fn actuate(
-        &mut self,
-        ts: u64,
-    ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>>
+    pub fn actuate(&mut self, ts: u64) -> Result<ControlInfo<Output>, ControllerError<Error>>
     where
         <Output as DoubleSize>::Ret: Debug + Copy,
         Output: Debug + Copy,
@@ -469,26 +413,23 @@ where
     /// # Errors
     ///
     /// If any numeric conversions fail.
-    fn compute_output(
-        &mut self,
-        ts: u64,
-    ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>> {
+    fn compute_output(&mut self, ts: u64) -> Result<ControlInfo<Output>, ControllerError<Error>> {
         let target: Output = match self.reference.pop_front() {
             Some(value) => value,
             None => return Err(ControllerError::BufferEmpty),
         };
 
-        let kp: Output = KP.convert()?;
-        let ki: Output = KI.convert()?;
-        let kd: Output = KD.convert()?;
+        let kp: Output = KP.convert();
+        let ki: Output = KI.convert();
+        let kd: Output = KD.convert();
 
-        let time_scale: Output = TIMESCALE.convert()?;
-        let ts: Output = ts.convert()?;
+        let time_scale: Output = TIMESCALE.convert();
+        let ts: Output = ts.convert();
 
-        let threshold_min = THRESHOLD_MIN.convert()?;
-        let threshold_max = THRESHOLD_MAX.convert()?;
+        let threshold_min = THRESHOLD_MIN.convert();
+        let threshold_max = THRESHOLD_MAX.convert();
 
-        let fixed_point = { 10i32.pow(FIXED_POINT) }.convert()?;
+        let fixed_point = { 10i32.pow(FIXED_POINT) }.convert();
 
         let actual: Output = self.measurement.1;
 
@@ -498,7 +439,7 @@ where
 
         // Integral is approximated as a sum of discrete signals.
         let avg: Output::Ret = self.previous.double_size() + error.double_size();
-        let two: Output = 2.convert()?;
+        let two: Output = 2.convert();
         let two = two.double_size();
         self.integral +=
             (Output::half_size(avg / two).map_err(|_| ControllerError::ValueToLarge)?) * ts
@@ -615,55 +556,77 @@ pub mod prelude {
             Ok(())
         }
     }
+    impl Channel<()> for i32 {
+        type Output = Self;
+
+        #[inline(always)]
+        fn set(&mut self, value: Self::Output) -> Result<(), ()> {
+            *self = value;
+            Ok(())
+        }
+    }
+    /*impl Channel<()> for u16 {
+        type Output = i32;
+
+        #[inline(always)]
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        fn set(&mut self, value: Self::Output) -> Result<(), ()> {
+            *self = value as Self;
+            Ok(())
+        }
+    }*/
+    impl Channel<()> for u16 {
+        type Output = f32;
+
+        #[inline(always)]
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        fn set(&mut self, value: Self::Output) -> Result<(), ()> {
+            *self = value as Self;
+            Ok(())
+        }
+    }
     pub use super::{Channel, Pid};
     pub use crate::new_pid;
 }
 
 mod sealed {
-    use core::{convert::Infallible, fmt::Debug};
-
-    use super::ControllerError;
 
     /// Converts a value in to the destination type if possible.
+
     pub trait Convert<Dest: Sized> {
-        /// The error value returned.
-        type Error: core::fmt::Debug;
         /// Converts the value in to the destination type.
-        fn convert(self) -> Result<Dest, Self::Error>;
+        fn convert(self) -> Dest;
     }
 
     impl Convert<Self> for i32 {
-        type Error = Infallible;
-
-        fn convert(self) -> Result<Self, Self::Error> {
-            Ok(self)
+        #[inline(always)]
+        fn convert(self) -> Self {
+            self
         }
     }
 
     impl Convert<i32> for u64 {
-        type Error = Infallible;
-
-        fn convert(self) -> Result<i32, Self::Error> {
-            Ok(self as i32)
+        #[inline(always)]
+        fn convert(self) -> i32 {
+            self as i32
         }
     }
 
     impl Convert<f32> for u64 {
-        type Error = Infallible;
-
-        fn convert(self) -> Result<f32, Self::Error> {
-            Ok(self as f32)
+        #[inline(always)]
+        fn convert(self) -> f32 {
+            self as f32
         }
     }
 
     impl Convert<f32> for i32 {
-        type Error = Infallible;
-
-        fn convert(self) -> Result<f32, Self::Error> {
-            Ok(self as f32)
+        #[inline(always)]
+        fn convert(self) -> f32 {
+            self as f32
         }
     }
     pub trait CmpExt {
+        #[inline(always)]
         fn max(self, other: Self) -> Self
         where
             Self: PartialOrd<Self> + Sized,
@@ -673,6 +636,8 @@ mod sealed {
                 false => other,
             }
         }
+
+        #[inline(always)]
         fn min(self, other: Self) -> Self
         where
             Self: PartialOrd<Self> + Sized,
@@ -692,14 +657,6 @@ mod sealed {
         };
     }
     ext!(i64, i32, i16, i8, u64, u32, u16, u8, f64, f32);
-
-    impl<Error: Debug, ConversionError: Debug> From<ConversionError>
-        for ControllerError<Error, ConversionError>
-    {
-        fn from(value: ConversionError) -> Self {
-            Self::ConversionError(value)
-        }
-    }
 }
 use sealed::{CmpExt, Convert};
 
@@ -707,10 +664,12 @@ impl DoubleSize for i32 {
     type Error = ();
     type Ret = i64;
 
+    #[inline(always)]
     fn double_size(self) -> Self::Ret {
         self.into()
     }
 
+    #[inline(always)]
     fn half_size(value: Self::Ret) -> Result<Self, Self::Error>
     where
         Self: Sized,
@@ -723,10 +682,12 @@ impl DoubleSize for f32 {
     type Error = Infallible;
     type Ret = f64;
 
+    #[inline(always)]
     fn double_size(self) -> Self::Ret {
         self.into()
     }
 
+    #[inline(always)]
     fn half_size(value: Self::Ret) -> Result<Self, Self::Error>
     where
         Self: Sized,
