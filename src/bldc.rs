@@ -48,15 +48,15 @@ impl DrivePattern {
                     0b01_10_00, // 0b101
                     0b00_01_10, // 0b110
                 */
-                    // micro chip version
-                    /*
-                    0b01_00_10, // 0b001
-                    0b00_10_01, // 0b010
-                    0b01_10_00, // 0b011
-                    0b10_01_00, // 0b100
-                    0b00_01_10, // 0b101
-                    0b10_00_01, // 0b110
-                    */
+                // micro chip version
+                /*
+                0b01_00_10, // 0b001
+                0b00_10_01, // 0b010
+                0b01_10_00, // 0b011
+                0b10_01_00, // 0b100
+                0b00_01_10, // 0b101
+                0b10_00_01, // 0b110
+                */
                 // micro chip version ccw
                 0b10_00_01, 0b00_01_10, 0b10_01_00, 0b01_10_00, 0b00_10_01, 0b01_00_10,
                 // Needed because the hal effects are funky
@@ -101,8 +101,38 @@ impl DrivePattern {
         self.idx &= 0b011;
     }
 
+    #[inline(always)]
+    /// Forces the motor to advance to the next step in commutation.
+    pub fn next(&mut self) {
+        self.idx = match self.idx {
+            0b000 => 0b000,
+            0b100 => 0b101,
+            0b101 => 0b001,
+            0b001 => 0b011,
+            0b011 => 0b010,
+            0b010 => 0b110,
+            0b110 => 0b100,
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline(always)]
+    /// Forces the motor to advance to the next step in commutation.
+    pub fn previous(&mut self) {
+        self.idx = match self.idx {
+            0b000 => 0b000,
+            0b101 => 0b100,
+            0b001 => 0b101,
+            0b011 => 0b001,
+            0b010 => 0b011,
+            0b110 => 0b010,
+            0b100 => 0b110,
+            _ => unreachable!(),
+        }
+    }
+
     /// Returns the current switching pattern.
-    pub fn get(&mut self) -> ((bool, bool), (bool, bool), (bool, bool)) {
+    pub fn get(&self) -> ((bool, bool), (bool, bool), (bool, bool)) {
         //debug_assert!(self.idx <= 0b110);
         let pattern = self.pattern[self.idx];
         (
@@ -110,6 +140,11 @@ impl DrivePattern {
             (pattern & 0b1000 != 0, pattern & 0b100 != 0),
             (pattern & 0b10 != 0, pattern & 0b1 != 0),
         )
+    }
+
+    /// Returns the latest state as a u8.
+    pub fn get_pattern_u8(&self) -> u8 {
+        self.pattern[self.idx]
     }
 
     #[allow(clippy::cast_possible_truncation)]

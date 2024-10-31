@@ -33,9 +33,14 @@
     clippy::cast_precision_loss,
     clippy::match_bool,
     // I see the benefits of this but it is not worth it for our use case.
-    clippy::from_over_into
+    clippy::from_over_into,
+    unstable_features,
+    incomplete_features
 )]
-#![feature(f16)]
+#![feature(
+    f16,
+    generic_const_exprs,const_trait_impl
+)]
 #![cfg_attr(not(feature = "std"), no_std, allow(internal_features))]
 pub mod constants;
 pub mod gain_scheduled;
