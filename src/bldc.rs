@@ -181,6 +181,11 @@ impl Pattern {
         )
     }
 
+    /// Returns the latest state as a u8.
+    pub fn get_pattern_u8(&self) -> u8 {
+        self.pattern[self.idx]
+    }
+
     #[allow(clippy::cast_possible_truncation)]
     /// Returns the current state.
     pub fn get_state(&self) -> u8 {

@@ -27,9 +27,11 @@ pub mod cart;
 //pub mod svm;
 
 use defmt_rtt as _;
+
 use panic_probe as _;
 pub mod boards;
 pub mod drivers;
+
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message
 // this prevents the panic message being printed *twice* when `defmt::panic` is
@@ -39,6 +41,16 @@ pub mod drivers;
 extern "C" fn _defmt_panic() -> ! {
     cortex_m::asm::udf()
 }
+
+    /* 
+#[panic_handler]
+#[allow(elided_lifetimes_in_paths)]
+#[unsafe(no_mangle)]
+#[inline(never)]
+fn panic(_info: &PanicInfo) -> ! {
+    loop {}
+}
+    */
 
 static COUNT: AtomicUsize = AtomicUsize::new(0);
 defmt::timestamp!("{=usize}", {
