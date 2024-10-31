@@ -435,8 +435,9 @@ mod test {
         SensorSubSystem,
         VelocityInfo,
         WriteType,
+        message::CanMessage
     };
-    use crate::protocol::CanMessage;
+    //use crate::protocol::CanMessage;
 
     #[test]
     fn test_serialize() {

@@ -5,6 +5,7 @@
 use controller as _;
 use controller::drivers::{
     can::{Mcp2515Driver, Mcp2515Settings},
+    hx711::*,
 };
 use cortex_m::asm as _;
 use cortex_m_rt::entry;
@@ -32,6 +33,7 @@ mod app {
                 CLKPRE,
                 RXBN,
             },
+            hx711::*,
         },
     };
     use cortex_m::asm;
@@ -49,16 +51,18 @@ mod app {
         timer::{fugit::ExtU64, Timer0 as Mono},
     };
 
-    
+    //candriver_node: Mcp2515Driver<Spi<SPI2>, Pin<Output<PushPull>>, Pin<Input<PullUp>>>,
+ 
 
     #[shared]
     struct Shared {
         gpiote: Gpiote,
-        pwm: Pwm<PWM0>, 
+        pwm: Pwm<PWM0>,
     }
 
     #[local]
     struct Local {
+        hx711: Hx711Driver<Pin<Output<PushPull>>, Pin<Input<Floating>>>,
     }
 
     #[init]
@@ -83,12 +87,14 @@ mod app {
 
         let mut gpiote = Gpiote::new(device.GPIOTE);
         let mut pwm = Pwm::new(device.PWM0);
+        let mut hx711_instance = Hx711Driver::init(pd_sck, dout_pin, Gain::Apply128);
+        
         let interrupt_token = rtic_monotonics::create_nrf_timer0_monotonic_token!(); 
         Mono::start(timer0, interrupt_token); 
 
         gpiote
             .channel0()
-            .input_pin(&dout_pin)
+            .input_pin(&hx711_instance.dout)
             .hi_to_lo()
             .enable_interrupt();
 
@@ -97,8 +103,9 @@ mod app {
             .set_period(500u32.hz())
             .enable();
 
-        (Shared { gpiote, pwm}, Local {
-            
+        (
+            Shared { gpiote, pwm}, 
+            Local {hx711: hx711_instance,  
         })
     }
 
@@ -111,11 +118,19 @@ mod app {
         }
     }
 
+    #[task(local = [hx711], priority = 2)]
+    async fn read_data(cx: read_data::Context){
+        let data = cx.local.hx711.read_full_period(Gain::Apply128).await;
+        defmt::println!("Data: {:?}", data);
+    }
+
+
     #[task(binds = GPIOTE, shared = [gpiote])]
     fn data_interrupt(mut cx: data_interrupt::Context) {
         let handle = cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
-                defmt::println!("Analog data received!");
+                defmt::info!("Analog data received!");
+                read_data::spawn();
                 gpiote.channel0().reset_events();
             }
 
