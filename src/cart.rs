@@ -21,36 +21,36 @@ pub mod controllers {
     use lib::pid::Pid;
 
     /// The Proportional gain for the motor.
-    pub const MOTOR_KP: i32 = 1_000;
+    pub const MOTOR_KP: i32 = 50_000;
     /// The Integral gain for the motor.
-    pub const MOTOR_KI: i32 = 50;
+    pub const MOTOR_KI: i32 = 250_000;
     /// The derivative gain for the motor.
-    pub const MOTOR_KD: i32 = 10;
+    pub const MOTOR_KD: i32 = 5;
     /// Motor sample time in the [`MOTOR_TIMESCALE`] time-frame.
-    pub const MOTOR_TS: u32 = 100_000;
+    pub const MOTOR_TS: u32 = 100;
     /// Motor time resolution
     pub const MOTOR_TIMESCALE: i32 = 1_000_000;
     /// The decimal point in the controller.
     ///
     /// So each KP,KI,KD is divided by this.
-    pub const MOTOR_FIXED_POINT: u32 = 2;
+    pub const MOTOR_FIXED_POINT: u32 = 3;
 
     /// The motor PID controller.
     ///
     /// This type makes it easier to change the controller without sideeffects.
     pub type MotorPid = Pid<
         (),
-        u16,
+        f32,
         f32,
         MOTOR_KP,
         MOTOR_KI,
         MOTOR_KD,
         { MOTOR_TS as i32 },
         // We want percentages.
-        { super::constants::PWM_MAX },
+        100,
         // This is a bit odd.
         // See https://docs.nordicsemi.com/bundle/ps_nrf52840/page/pwm.html#ariaid-title24
-        3,
+        0,
         // We will use uS as timescale.
         MOTOR_TIMESCALE,
         MOTOR_FIXED_POINT,
