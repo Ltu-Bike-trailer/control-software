@@ -249,17 +249,17 @@ mod app {
 
         cx
             .shared.pattern.lock(|pattern| *pattern = cx.local.drive_pattern.get_pattern_u8());
-        /*cortex_m::peripheral::NVIC::mask(nrf52840_hal::pac::Interrupt::GPIOTE);
+        cortex_m::peripheral::NVIC::mask(nrf52840_hal::pac::Interrupt::GPIOTE);
         // This might be bad practice but it is a neat way to wake the motor controller.
         cx.shared.debounce.lock(|d|{
             d.timeout::<1, 16000000>(1u64.micros().into());
             d.enable_interrupt();
-        });*/
-        defmt::info!("State : {}",cx.local.drive_pattern.get_state());
+        });
+        //defmt::info!("State : {}",cx.local.drive_pattern.get_state());
         //cortex_m::peripheral::NVIC::pend(TIMER2::INTERRUPT);
-        cx.shared.motor_control_timer.lock(|timer| { timer.timeout::<1, 16000000>(1u64.micros()); timer.enable_interrupt() });
-        
+       // cx.shared.motor_control_timer.lock(|timer| { timer.timeout::<1, 16000000>(100u64.micros()) });
 
+        let _ = phase_driver::spawn();
         // Trigger the phases inline since we want to run it as fast as
         // possible.
         //
@@ -291,7 +291,7 @@ mod app {
     }
 
     #[task(
-        binds=TIMER2,
+        //binds=TIMER2,
         local = [
             phase1,
             phase2,
@@ -315,9 +315,11 @@ mod app {
     /// 4. Table branch, 12 writes for en/dis, 3 writes for pwm.
     /// 
     /// It takes some 1.2KiB data, which is fine since we want it to branch far rather than often.
-    fn phase_driver(mut cx: phase_driver::Context) {
+    async fn phase_driver(cx: phase_driver::Context) {
+        let now = Mono::now();
+        Mono::delay(10u64.micros()).await;
         defmt::info!("Phaze!");
-        cx.shared.motor_control_timer.lock(|t| t.reset_event());
+        //cx.shared.motor_control_timer.lock(|t| t.reset_event());
         //defmt::info!("Phase driving");
 
         // 1. Reset event so we do not get issues.
@@ -325,15 +327,26 @@ mod app {
         // 2. Get the latest state. We need all of these at once so we might as well lock all.
         let (
                 duty,
-                pattern,
+                mut pattern,
                 dt
-         ) = (cx.shared.duty,cx.shared.pattern,cx.shared.time_difference_hal_effect).lock(|a,b,c| (*a,b.clone(),c.clone()));
-        let now = Mono::now();
+        ) = (cx.shared.duty,cx.shared.pattern,cx.shared.time_difference_hal_effect).lock(|a,b,c| ({
+            let ret = *a;
+            //let new = *a as u32 *100;
+            //*a = (new /110) as u16;
+            //ret
+            ret        
+            },b.clone(),c.clone()));
+
+        //NVIC::unpend(TIMER2::INTERRUPT);
         // 3. Set a timeout for when we expect the next hall effect event to come in.
 
         // 4. Apply latest control signals.
         let (phase1,phase2,phase3) = (cx.local.phase1,cx.local.phase2,cx.local.phase3);
-        defmt::info!("Supplied {=u8:b}",pattern);
+        if pattern == 0 {
+            pattern = *cx.local.prev_step;
+        }
+        defmt::info!("Supplied {:b}",pattern.clone());
+        
         // Burns a bit of memory but we get a single jump instruction in to 8 single write instructions.
         // While this is a bit expensive we expect it to be ran every time. So nothing smart to do here.
 
@@ -617,16 +630,14 @@ mod app {
             }
         }
 
+         
+         /*  
         if *cx.local.prev_step == pattern {
             cx.shared.motor_control_timer.lock(|w| {
-                w.timeout(unsafe { now.checked_add_duration(dt).unwrap_unchecked().checked_duration_since(now).unwrap_unchecked() });
+                w.timeout::<1,16_000_000>(100u64.millis().into());
                 w.enable_interrupt();
             });
-            phase1.set_duty(0.);
-            phase2.set_duty(0.);
-            phase3.set_duty(0.);
-            return
-        }
+        }*/
 
         // This is semi expensive.
         // So if we do not need to do it we should not.
@@ -634,7 +645,7 @@ mod app {
             return;
         }*/
         let fduty = duty as f32 / cart::constants::PWM_MAX as f32;
-        let fduty = fduty.clamp(0.5, 0.9);
+        let fduty = fduty.clamp(0.1, 0.9);
         phase1.set_duty(fduty);
         phase2.set_duty(fduty);
         phase3.set_duty(fduty);
@@ -650,6 +661,7 @@ mod app {
 
     
 
+    /* 
     #[task(binds = TIMER3,
         local = [
             pid,
@@ -682,6 +694,7 @@ mod app {
         //cx.shared.duty.lock(|duty| *duty = actuation.actuation as u16);
         timer.timeout(unsafe { (start+DURATION).checked_duration_since(Mono::now()).unwrap_unchecked() });
     }
+    */
 
     #[task(binds = SAADC, local=[current_sense,n:i32 = 0],shared =[current])]
     /// Continuously samples the current.
