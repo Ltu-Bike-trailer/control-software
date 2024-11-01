@@ -183,7 +183,7 @@ impl Pattern {
 
     /// Returns the latest state as a u8.
     pub fn get_pattern_u8(&self) -> u8 {
-        self.pattern[self.idx]
+        unsafe { *self.pattern.get_unchecked(self.idx) }
     }
 
     #[allow(clippy::cast_possible_truncation)]
