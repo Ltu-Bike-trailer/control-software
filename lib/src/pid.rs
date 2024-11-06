@@ -86,6 +86,28 @@ pub struct Pid<
 }
 
 /// This assumes that we have a i32 as data.
+pub struct PidFixedPoint<
+    Error: Debug,
+    const KP: u64,
+    const KI: u64,
+    const KD: u64,
+    const TS: u64,
+    const THRESHOLD_MAX: i32,
+    const THRESHOLD_MIN: i32,
+    const TIMESCALE: i64,
+    const FIXED_POINT_NOM: i64,
+    const FIXED_POINT_DENOM: i64,
+> {
+    err: PhantomData<Error>,
+    _out: u32,
+    reference: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM>,
+    previous: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM>,
+    // This might need to be changed in to i64 to not cause errors.
+    integral: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM>,
+    measurement: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM>,
+}
+
+/// This assumes that we have a i32 as data.
 pub struct PidDynamic<
     Error: Debug,
     Interface: Channel<Error>,
@@ -126,6 +148,313 @@ pub struct ControlInfo<Output: Sized> {
     pub d: Output,
     /// The output pre-threshold.
     pub pre_threshold: Output,
+}
+
+impl<
+        Error: Debug,
+        const KP: u64,
+        const KI: u64,
+        const KD: u64,
+        const TS: u64,
+        const THRESHOLD_MAX: i32,
+        const THRESHOLD_MIN: i32,
+        const TIMESCALE: i64,
+        const FIXED_POINT_NOM: i64,
+        const FIXED_POINT_DENOM: i64,
+    >
+    PidFixedPoint<
+        Error,
+        KP,
+        KI,
+        KD,
+        TS,
+        THRESHOLD_MAX,
+        THRESHOLD_MIN,
+        TIMESCALE,
+        FIXED_POINT_NOM,
+        FIXED_POINT_DENOM,
+    >
+where
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM } as usize]:,
+    [(); { FIXED_POINT_NOM * FIXED_POINT_DENOM } as usize]:,
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM }
+        as usize]:,
+    [(); { FIXED_POINT_NOM * FIXED_POINT_NOM } as usize]:,
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_NOM } as usize]:,
+    [(); { 1 * FIXED_POINT_NOM } as usize]:,
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM } as usize]:,
+    [(); { 1 * FIXED_POINT_DENOM } as usize]:,
+    [(); FIXED_POINT_DENOM as usize]:,
+    [(); FIXED_POINT_NOM as usize]:,
+{
+    const KD: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = FixedPoint::new(KD as i64);
+    const KI: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = FixedPoint::new(KI as i64);
+    const KP: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = FixedPoint::new(KP as i64);
+    const THRESHOLD_MAX: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> =
+        FixedPoint::new(THRESHOLD_MAX as i64);
+    const THRESHOLD_MIN: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> =
+        FixedPoint::new(THRESHOLD_MIN as i64);
+    const TS: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> =
+        FixedPoint::<1, TIMESCALE>::new(TS as i64).convert();
+    const TWO: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> =
+        FixedPoint::<2, 1>::new(1).convert();
+
+    /// Creates a new controller that sets the output on the
+    /// [`Interface`](`Channel`) using a PID control strategy.
+    pub fn new() -> Self {
+        Self {
+            err: PhantomData,
+            reference: FixedPoint::new(0),
+            previous: FixedPoint::new(0),
+            integral: FixedPoint::new(0),
+            measurement: FixedPoint::new(0),
+            _out: 0,
+        }
+    }
+
+    /// Completely erases previous control signal.
+    #[inline(always)]
+    pub fn follow(&mut self, value: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM>) {
+        self.reference = value;
+    }
+
+    /// Registers the most recent measurement.
+    #[inline(always)]
+    pub fn register_measurement(&mut self, value: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM>) {
+        self.measurement = value;
+    }
+
+    /// Computes the control signal using a PID control strategy.
+    ///
+    /// if successful it returns the expected value and the read value.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the underlying [`Channel`] fails or
+    /// any numeric conversions fail.
+    #[inline(always)]
+    pub fn actuate(&mut self) -> Result<f32, ControllerError<Error>> {
+        let output = self.compute_output();
+        Ok(output)
+    }
+
+    /// Computes the latest control output.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the underlying [`Channel`] fails or
+    /// any numeric conversions fail.
+    #[inline(always)]
+    fn compute_output(&mut self) -> f32
+    where
+        [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM } as usize]:,
+        [(); { FIXED_POINT_NOM * FIXED_POINT_DENOM } as usize]:,
+        [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM }
+            as usize]:,
+        [(); { FIXED_POINT_NOM * FIXED_POINT_NOM } as usize]:,
+        [(); { FIXED_POINT_DENOM * FIXED_POINT_NOM } as usize]:,
+        [(); { 1 * FIXED_POINT_NOM } as usize]:,
+        [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM } as usize]:,
+        [(); { 1 * FIXED_POINT_DENOM } as usize]:,
+        [(); FIXED_POINT_DENOM as usize]:,
+        [(); FIXED_POINT_NOM as usize]:,
+    {
+        // TODO: Remove all of the converts. The entire point of this is to not use
+        // that.
+        let target = self.reference;
+
+        let actual = self.measurement;
+
+        let error: FixedPoint<1, FIXED_POINT_DENOM> = target.sub(actual).convert();
+
+        let p: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = error.mul(Self::KP).convert();
+        // Integral is approximated as a sum of discrete signals.
+        let avg: FixedPoint<1, FIXED_POINT_DENOM> = self.previous.add(error).convert();
+        let avg: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = avg.div(Self::TWO).convert();
+        let avg: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = avg.mul(Self::TS).convert();
+        self.integral = self
+            .integral
+            .add(avg)
+            .const_min::<_, _, FIXED_POINT_NOM, FIXED_POINT_DENOM>(&Self::THRESHOLD_MAX)
+            .const_max(&Self::THRESHOLD_MIN);
+
+        let i: FixedPoint<1, FIXED_POINT_DENOM> = self.integral.mul(Self::KI).convert();
+
+        let d: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = error.sub(self.previous).convert();
+        let d: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = d.div(Self::TS).convert();
+        let d: FixedPoint<1, FIXED_POINT_DENOM> = d.mul(Self::KD).convert();
+
+        let output: FixedPoint<1, FIXED_POINT_DENOM> = p.add(i).convert();
+        output.add(d).into_float()
+
+        /*
+
+        // Compute the rate of change between previous time-step and this time-step.
+        let d = kd * time_scale * (error - self.previous) / ts;
+
+        self.previous = error;
+
+        let output = ((p + i + d) / fixed_point)
+            .max(threshold_min)
+            .min(threshold_max);
+
+        ControlInfo {
+            reference: target,
+            measured: actual,
+            actuation: output,
+            p,
+            i,
+            d,
+            pre_threshold: (p + i + d) / fixed_point,
+        }*/
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy)]
+/// Represents a fixed point number.
+///
+/// This is intended to be used instead of a float to save mcp lcp instructions.
+pub struct FixedPoint<const NOM: i64, const DENOM: i64> {
+    val: i64,
+}
+
+#[allow(dead_code)]
+impl<const NOM: i64, const DENOM: i64> FixedPoint<NOM, DENOM> {
+    /// Returns a new instance of the fixed value.
+    #[inline(always)]
+    pub const fn new(val: i64) -> Self {
+        Self { val }
+    }
+
+    /// Returns the maximum of self or the other values.
+    #[inline(always)]
+    pub const fn const_max<
+        const ONOM: i64,
+        const ODENOM: i64,
+        const TNOM: i64,
+        const TDENOM: i64,
+    >(
+        &self,
+        other: &FixedPoint<ONOM, ODENOM>,
+    ) -> FixedPoint<TNOM, TDENOM> {
+        if self.val * (NOM * ODENOM) > other.val * (ONOM * DENOM) {
+            return self.convert();
+        }
+        return other.convert();
+    }
+
+    /// Returns the minimum of self or the other value.
+    #[inline(always)]
+    pub const fn const_min<
+        const ONOM: i64,
+        const ODENOM: i64,
+        const TNOM: i64,
+        const TDENOM: i64,
+    >(
+        &self,
+        other: &FixedPoint<ONOM, ODENOM>,
+    ) -> FixedPoint<TNOM, TDENOM> {
+        if self.val * (NOM * ODENOM) < other.val * (ONOM * DENOM) {
+            return self.convert();
+        }
+        return other.convert();
+    }
+
+    #[inline(always)]
+    /// Multiplies self with other.
+    pub const fn mul<const ONOM: i64, const ODENOM: i64>(
+        self,
+        other: FixedPoint<ONOM, ODENOM>,
+    ) -> FixedPoint<{ NOM * ONOM }, { DENOM * ODENOM }> {
+        FixedPoint {
+            val: self.val * other.val,
+        }
+    }
+
+    #[inline(always)]
+    /// Divides two numbers.
+    pub const fn div<const ONOM: i64, const ODENOM: i64>(
+        self,
+        other: FixedPoint<ONOM, ODENOM>,
+    ) -> FixedPoint<{ NOM * ODENOM }, { DENOM * ONOM }> {
+        FixedPoint {
+            // This is an issue. Look in to this :)
+            val: self.val / other.val,
+        }
+    }
+
+    #[inline(always)]
+    /// Returns the maximum of two values.
+    pub const fn max(a: i64, b: i64) -> i64 {
+        if a > b {
+            return a;
+        }
+        return b;
+    }
+
+    #[inline(always)]
+    /// Adds self to other.
+    pub const fn add<const ONOM: i64, const ODENOM: i64>(
+        self,
+        other: FixedPoint<ONOM, ODENOM>,
+    ) -> FixedPoint<1, { DENOM * ODENOM }>
+    where
+        [(); { DENOM * ODENOM } as usize]:,
+        [(); { ODENOM * DENOM } as usize]:,
+        [(); { DENOM * ODENOM } as usize]:,
+    {
+        FixedPoint {
+            // This is an issue. Look in to this :)
+
+            /*
+                   1         1
+               afb -   + dec -
+                   cf        fc
+            */
+            val: self.val * NOM * ODENOM + other.val * ONOM * DENOM,
+        }
+    }
+
+    #[inline(always)]
+    /// Subtract other from self.
+    pub const fn sub<const ONOM: i64, const ODENOM: i64>(
+        self,
+        other: FixedPoint<ONOM, ODENOM>,
+    ) -> FixedPoint<1, { DENOM * ODENOM }>
+    where
+        [(); { DENOM * ODENOM } as usize]:,
+    {
+        FixedPoint {
+            // This is an issue. Look in to this :)
+
+            /*
+                   1         1
+               afb --  - dec --
+                   cf        fc
+            */
+            val: self.val * NOM * ODENOM - other.val * ONOM * DENOM,
+        }
+    }
+
+    #[inline(always)]
+    /// Converts the number in to the destination size.
+    ///
+    /// This can cause precision.
+    pub const fn convert<const TNOM: i64, const TDENOM: i64>(self) -> FixedPoint<TNOM, TDENOM> {
+        if TNOM == NOM && DENOM == TDENOM {
+            return FixedPoint { val: self.val };
+        }
+        debug_assert!(NOM * TDENOM > TNOM * DENOM);
+        let val = self.val * (NOM * TDENOM / (TNOM * DENOM));
+        FixedPoint { val }
+    }
+
+    #[inline(always)]
+    /// Converts the number in to a float.
+    pub const fn into_float(self) -> f32 {
+        (self.val as f32) * ({ NOM as f32 } / { DENOM as f32 })
+    }
 }
 
 impl<
@@ -221,6 +550,7 @@ where
     ///
     /// This function returns an error if the underlying [`Channel`] fails or
     /// any numeric conversions fail.
+    #[inline(always)]
     fn compute_output(&mut self) -> ControlInfo<Output> {
         let target: Output = self.reference.clone();
 

@@ -18,16 +18,16 @@ pub mod constants {
 
 /// Defines the controllers used in the cart.
 pub mod controllers {
-    use lib::pid::Pid;
+    use lib::pid::{Pid, PidFixedPoint};
 
     /// The Proportional gain for the motor.
-    pub const MOTOR_KP: i32 = 50_000;
+    pub const MOTOR_KP: i32 = 1000;
     /// The Integral gain for the motor.
-    pub const MOTOR_KI: i32 = 250_000;
+    pub const MOTOR_KI: i32 = 250;
     /// The derivative gain for the motor.
     pub const MOTOR_KD: i32 = 5;
     /// Motor sample time in the [`MOTOR_TIMESCALE`] time-frame.
-    pub const MOTOR_TS: u32 = 100;
+    pub const MOTOR_TS: u32 = 5_000;
     /// Motor time resolution
     pub const MOTOR_TIMESCALE: i32 = 1_000_000;
     /// The decimal point in the controller.
@@ -54,5 +54,24 @@ pub mod controllers {
         // We will use uS as timescale.
         MOTOR_TIMESCALE,
         MOTOR_FIXED_POINT,
+    >;
+    /// The motor PID controller.
+    ///
+    /// This type makes it easier to change the controller without sideeffects.
+    pub type MotorPidAlt = PidFixedPoint<
+        (),
+        { MOTOR_KP as u64 },
+        { MOTOR_KI as u64 },
+        { MOTOR_KD as u64 },
+        { MOTOR_TS as u64 },
+        // We want percentages.
+        100,
+        // This is a bit odd.
+        // See https://docs.nordicsemi.com/bundle/ps_nrf52840/page/pwm.html#ariaid-title24
+        0,
+        // We will use uS as timescale.
+        { MOTOR_TIMESCALE as i64 },
+        { 10i64.pow(MOTOR_FIXED_POINT) },
+        1,
     >;
 }

@@ -37,7 +37,10 @@ mod app {
         time::U32Ext,
         timer::OneShot,
     };
-    use rtic_monotonics::{fugit::ExtU32, Monotonic};
+    use rtic_monotonics::{
+        fugit::{ExtU32, Instant},
+        Monotonic,
+    };
 
     use crate::Mono;
 
@@ -49,6 +52,7 @@ mod app {
         duty: f32,
         velocity: f32,
         current: f32,
+        dvel: (f32, usize),
     }
 
     // Local resources go here
@@ -86,8 +90,8 @@ mod app {
         let (pins, p1) = pins.configure_p1();
         let (pins, p2) = pins.configure_p2();
         let (pins, p3) = pins.configure_p3();
-        let (pins, mut current_sense) = pins.configure_adc(cx.device.SAADC);
-        current_sense.start_sample();
+        let (pins, current_sense) = pins.configure_adc(cx.device.SAADC);
+        //current_sense.start_sample();
         let events = pins.complete();
         let hal_pins = [p1.hal_effect, p2.hal_effect, p3.hal_effect];
 
@@ -154,6 +158,7 @@ mod app {
                 duty: 0.5,
                 velocity: 0.,
                 current: 0.,
+                dvel: (0., 0),
             },
             Local {
                 // Initialization of local resources go here
@@ -172,13 +177,32 @@ mod app {
         )
     }
 
-    #[task(binds=GPIOTE, local=[
-        events,
-        hal_pins,
-        t:Option<u64> = None,
-        drive_pattern,
-        pattern_sender
-        ], priority = 5)]
+    #[task(
+        binds=GPIOTE,
+        local=[
+            events,
+            hal_pins,
+            t:Option<u64> = None,
+            drive_pattern,
+            pattern_sender,
+            prev: (
+                Option<Instant<u64,1,32_768>>,
+                Option<Instant<u64,1,32_768>>,
+                Option<Instant<u64,1,32_768>>
+            ) = (
+                None,
+                None,
+                None
+            ),
+            previous_avel:f32 = 0.,
+            prev_vel_t: Option<Instant<u64,1,32_768>> = None,
+
+        ],
+        shared = [
+            dvel
+        ],
+        priority = 5
+    )]
     /// Manages gpiote interrupts.
     ///
     /// This is every pin interrupt. So hal effect feedback, can bus messages
@@ -192,12 +216,19 @@ mod app {
     /// controller requests a new velocity.
     ///
     /// This ensures that the motor can be started from standstill.
-    fn handle_gpio(cx: handle_gpio::Context) {
+    fn handle_gpio(mut cx: handle_gpio::Context) {
+        let now = Mono::now();
+        let mut dt = None;
         for event in cx.local.events.events() {
             match event {
                 GpioEvents::P1HalRising => {
                     //defmt::info!("P1 hal rising");
                     cx.local.drive_pattern.set_a();
+                    cx.local
+                        .prev
+                        .0
+                        .replace(now.clone())
+                        .map(|el| dt = Some(now - el));
                 }
                 GpioEvents::P1HalFalling => {
                     //defmt::info!("P2 hal falling");
@@ -206,6 +237,11 @@ mod app {
                 GpioEvents::P2HalRising => {
                     //defmt::info!("P2 hal rising");
                     cx.local.drive_pattern.set_b();
+                    cx.local
+                        .prev
+                        .1
+                        .replace(now.clone())
+                        .map(|el| dt = Some(now - el));
                 }
                 GpioEvents::P2HalFalling => {
                     cx.local.drive_pattern.clear_b();
@@ -214,6 +250,11 @@ mod app {
                 GpioEvents::P3HalRising => {
                     //defmt::info!("P3 hal rising");
                     cx.local.drive_pattern.set_c();
+                    cx.local
+                        .prev
+                        .2
+                        .replace(now.clone())
+                        .map(|el| dt = Some(now - el));
                 }
                 GpioEvents::P3HalFalling => {
                     //defmt::info!("P3 hal falling");
@@ -229,11 +270,41 @@ mod app {
             .try_send(cx.local.drive_pattern.get())
             .unwrap();
 
+        if let Some(dt) = dt {
+            let pt = cx.local.prev_vel_t.replace(now.clone());
+            if pt.is_none() {
+                return;
+            }
+            let pt = unsafe { pt.unwrap_unchecked() };
+
+            let dt = dt.to_micros() as f32 / 1_000_000.;
+            const FACTOR: f32 = core::f32::consts::TAU / 86.;
+            let avel = FACTOR / dt;
+            let dt = (now - pt).to_micros() as f32 / 1_000_000.;
+            let prev = cx.local.previous_avel.clone();
+            *cx.local.previous_avel = avel.clone();
+            let dvel = (avel - prev) / dt;
+
+            // TODO! Manage negative velocities.
+            //defmt::info!("Angular acc {}", dvel);
+            cx.shared
+                .dvel
+                .lock(|target| *target = (target.0 + dvel, target.1 + 1))
+
+            /*let prev = cx.local.previous_avel.clone();
+            *cx.local.previous_avel = avel.clone();
+
+            let dvel = (avel - prev) / dt;
+            defmt::info!("{}", dvel);
+            cx.shared.dvel.lock(|target| {
+                *target = ((target.0 + dvel) / 2., now.duration_since_epoch().to_micros())
+            });*/
+        }
         // Trigger the phases inline since we want to run it as fast as
         // possible.
         //
         // Doing it this way ensures that we never miss a state, given that the
-        // app i schedulable.
+        // app is schedulable.
         //defmt::info!("Got hal effect interrupt!");
     }
 
@@ -363,11 +434,12 @@ mod app {
         shared = [
             duty,
             current,
+            dvel
         ],
         priority = 4,
     )]
     fn control_loop(mut cx: control_loop::Context) {
-        defmt::info!("Control loop");
+        //defmt::info!("Control loop");
         let start: rtic_monotonics::fugit::Instant<u64, 1, 32_768> = Mono::now();
         let timer = cx.local.control_loop_timer;
         timer.reset_event();
@@ -380,18 +452,25 @@ mod app {
             >::from_ticks(controller::cart::controllers::MOTOR_TS as u64)
             .convert();
 
-        let current = cx.shared.current.lock(|c| {
+        /*let current = cx.shared.current.lock(|c| {
             let ret = c.clone();
             *c = f32::NEG_INFINITY;
             ret
         });
-        defmt::info!("Current : {} mA", current);
-
+        defmt::info!("Current : {} mA", current);*/
+        let (dvel, step) = cx.shared.dvel.lock(|t| {
+            let ret = t.clone();
+            *t = (0., 0);
+            ret
+        });
+        let dvel = (dvel / step as f32).clamp(-50., 50.);
+        //defmt::info!("Dvel {}", dvel);
         // Target 500 mA
-        cx.local.pid.follow(2.);
+        // 1 Rad per second I guess.
+        cx.local.pid.follow(10.);
         cx.local
             .pid
-            .register_measurement(current, controller::cart::controllers::MOTOR_TS);
+            .register_measurement(dvel, controller::cart::controllers::MOTOR_TS);
         // This is fine. The only time this throws an error is if the u16 fails to write
         // which it never does.
         let actuation = unsafe { cx.local.pid.actuate().unwrap_unchecked() };
