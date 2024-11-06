@@ -39,7 +39,11 @@
 )]
 #![feature(
     f16,
-    generic_const_exprs,const_trait_impl
+    generic_const_exprs,
+    const_trait_impl,
+    generic_associated_types_extended,
+    generic_const_items,
+    generic_arg_infer
 )]
 #![cfg_attr(not(feature = "std"), no_std, allow(internal_features))]
 pub mod constants;
