@@ -3,9 +3,7 @@
 #![allow(unused)]
 
 use controller as _;
-use controller::drivers::{
-    can::{Mcp2515Driver, Mcp2515Settings},
-};
+use controller::drivers::can::{Mcp2515Driver, Mcp2515Settings};
 use cortex_m::asm as _;
 use cortex_m_rt::entry;
 use defmt_rtt as _;
@@ -19,24 +17,23 @@ mod app {
 
     use controller::{
         boards::*,
-        drivers::{
-            can::{
-                AcceptanceFilterMask,
-                Bitrate,
-                Mcp2515Driver,
-                Mcp2515Settings,
-                McpClock,
-                OperationTypes,
-                ReceiveBufferMode,
-                SettingsCanCtrl,
-                CLKPRE,
-                RXBN,
-            },
+        drivers::can::{
+            AcceptanceFilterMask,
+            Bitrate,
+            Mcp2515Driver,
+            Mcp2515Settings,
+            McpClock,
+            OperationTypes,
+            ReceiveBufferMode,
+            SettingsCanCtrl,
+            CLKPRE,
+            RXBN,
         },
     };
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};
     use embedded_hal::{digital::OutputPin, spi::SpiBus};
+    use lib::protocol::sender::Sender;
     use nrf52840_hal::{
         gpio::{self, Floating, Input, Level, Output, Pin, Port, PullUp, PushPull},
         gpiote::{Gpiote, GpioteInputPin},
@@ -46,7 +43,6 @@ mod app {
         spim::*,
         Clocks,
     };
-    use lib::protocol::sender::Sender;
     use rtic_monotonics::nrf::{
         self,
         rtc::*,
@@ -98,6 +94,7 @@ mod app {
             miso: Some(port0.p0_28.into_floating_input().degrade()),
         };
 
+        /// ESP PINS 
         let pins_node = nrf52840_hal::spi::Pins {
             sck: Some(port0.p0_04.into_push_pull_output(Level::Low).degrade()),
             mosi: Some(port0.p0_11.into_push_pull_output(Level::Low).degrade()),
@@ -134,7 +131,7 @@ mod app {
             ABAT,
             OSM,
         );
-        
+
         let can_settings = Mcp2515Settings::new(
             canctrl_settings,
             McpClock::MCP8,
@@ -164,15 +161,17 @@ mod app {
         defmt::println!("After initializing Spi<SPI1>...");
         let dummy_id = StandardId::new(0x2).unwrap();
         defmt::info!("dummy_data: {:?}", dummy_data.len());
-        
+
         let mut sender = Sender::new();
         sender.set_left_motor(1.0).unwrap();
+        
         let mut msg = sender.dequeue().unwrap();
         msg.print_frame();
         can_driver.transmit(&msg);
 
         //let mut frame =
-         //   CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02, 0x03]).unwrap();
+        //   CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02,
+        // 0x03]).unwrap();
 
         //can_driver.loopback_test(frame);
         //can_driver.transmit(&frame);
@@ -202,7 +201,6 @@ mod app {
                 defmt::info!("GPIOTE interrupt occurred [channel 0] - Can Master!");
                 let interrupt_type = cx.local.candriver.interrupt_decode().unwrap();
                 cx.local.candriver.handle_interrupt(interrupt_type);
-
 
                 if (cx.local.candriver.interrupt_is_cleared()) {
                     defmt::info!("All CAN interrupt has been handled!");

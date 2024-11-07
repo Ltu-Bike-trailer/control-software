@@ -3,9 +3,7 @@
 #![allow(unused)]
 
 use controller as _;
-use controller::drivers::{
-    can::{Mcp2515Driver, Mcp2515Settings},
-};
+use controller::drivers::can::{Mcp2515Driver, Mcp2515Settings};
 use cortex_m::asm as _;
 use cortex_m_rt::entry;
 use defmt_rtt as _;
@@ -19,25 +17,23 @@ mod app {
 
     use controller::{
         boards::*,
-        drivers::{
-            can::{
-                AcceptanceFilterMask,
-                Bitrate,
-                Mcp2515Driver,
-                Mcp2515Settings,
-                McpClock,
-                OperationTypes,
-                ReceiveBufferMode,
-                SettingsCanCtrl,
-                CLKPRE,
-                RXBN,
-            },
+        drivers::can::{
+            AcceptanceFilterMask,
+            Bitrate,
+            Mcp2515Driver,
+            Mcp2515Settings,
+            McpClock,
+            OperationTypes,
+            ReceiveBufferMode,
+            SettingsCanCtrl,
+            CLKPRE,
+            RXBN,
         },
     };
-    use lib::protocol::message::CanMessage;
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};
     use embedded_hal::{digital::OutputPin, spi::SpiBus};
+    use lib::protocol::message::CanMessage;
     use nrf52840_hal::{
         gpio::{self, Floating, Input, Level, Output, Pin, Port, PullUp, PushPull},
         gpiote::{Gpiote, GpioteInputPin},

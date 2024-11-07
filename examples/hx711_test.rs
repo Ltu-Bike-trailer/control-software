@@ -39,20 +39,25 @@ mod app {
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};
     use embedded_hal::{digital::OutputPin, spi::SpiBus};
-    use nrf52840_hal::{
-        gpio::{self, Floating, Input, Level, Output, Pin, Port, PullUp, PushPull}, gpiote::{Gpiote, GpioteInputPin}, pac::{Interrupt, GPIOTE, PWM0, SPI0, SPI1, SPI2, SPIM0, SPIM1, SPIM2}, pwm::{self, Channel, Pwm}, spi::{Frequency, Spi}, spim::{self, *}, time::U32Ext, Clocks
-    };
-    
     use lib::protocol::sender::Sender;
-    use rtic_monotonics::Monotonic;
-    use rtic_monotonics::nrf::{
-        self,
-        rtc::*,
-        timer::{fugit::ExtU64, Timer0 as Mono},
+    use nrf52840_hal::{
+        gpio::{self, Floating, Input, Level, Output, Pin, Port, PullUp, PushPull},
+        gpiote::{Gpiote, GpioteInputPin},
+        pac::{Interrupt, GPIOTE, PWM0, SPI0, SPI1, SPI2, SPIM0, SPIM1, SPIM2},
+        pwm::{self, Channel, Pwm},
+        spi::{Frequency, Spi},
+        spim::{self, *},
+        time::U32Ext,
+        Clocks,
     };
-
-    //candriver_node: Mcp2515Driver<Spi<SPI2>, Pin<Output<PushPull>>, Pin<Input<PullUp>>>,
- 
+    use rtic_monotonics::{
+        nrf::{
+            self,
+            rtc::*,
+            timer::{fugit::ExtU64, Timer0 as Mono},
+        },
+        Monotonic,
+    };
 
     #[shared]
     struct Shared {
@@ -75,22 +80,22 @@ mod app {
         let clk = Clocks::new(device.CLOCK).enable_ext_hfosc().start_lfclk();
         let systick = cx.core.SYST;
         let timer0 = device.TIMER0;
-        
+
         //let pin_mapping = PinMapping::new(port0, port1);
         //let (pin_map, spi) =pin_mapping.can(device.SPIM1);
 
-        defmt::println!("Initialize the SPI instance, and CanDriver");
+        defmt::println!("Initialize the HX711 Driver!");
 
-        let dout_pin = port0.p0_02.into_floating_input().degrade();
-        let pd_sck = port0.p0_03.into_push_pull_output(Level::Low).degrade();
-        let pwm_output_pin = port0.p0_04.into_push_pull_output(Level::High).degrade();
+        let dout_pin = port0.p0_04.into_floating_input().degrade();
+        let pd_sck = port0.p0_05.into_push_pull_output(Level::Low).degrade();
+        let pwm_output_pin = port0.p0_07.into_push_pull_output(Level::High).degrade();
 
         let mut gpiote = Gpiote::new(device.GPIOTE);
         let mut pwm = Pwm::new(device.PWM0);
         let mut hx711_instance = Hx711Driver::init(pd_sck, dout_pin, Gain::Apply128);
-        
-        let interrupt_token = rtic_monotonics::create_nrf_timer0_monotonic_token!(); 
-        Mono::start(timer0, interrupt_token); 
+
+        let interrupt_token = rtic_monotonics::create_nrf_timer0_monotonic_token!();
+        Mono::start(timer0, interrupt_token);
 
         gpiote
             .channel0()
@@ -98,14 +103,12 @@ mod app {
             .hi_to_lo()
             .enable_interrupt();
 
-        pwm
-            .set_output_pin(Channel::C0, pwm_output_pin)
+        pwm.set_output_pin(Channel::C0, pwm_output_pin)
             .set_period(500u32.hz())
             .enable();
 
-        (
-            Shared { gpiote, pwm}, 
-            Local {hx711: hx711_instance,  
+        (Shared { gpiote, pwm }, Local {
+            hx711: hx711_instance,
         })
     }
 
@@ -119,11 +122,13 @@ mod app {
     }
 
     #[task(local = [hx711], priority = 2)]
-    async fn read_data(cx: read_data::Context){
+    async fn read_data(cx: read_data::Context) {
         let data = cx.local.hx711.read_full_period(Gain::Apply128).await;
-        defmt::println!("Data: {:?}", data);
-    }
+        let decoded_data = cx.local.hx711.decode_data(data);
+        defmt::println!("Data [24-bit]: {:024b}\n Data: {:?}\nData [32-bit]: {:032b}", data, data, data);
+        defmt::println!("Decoded Data: {:?}", decoded_data.data_out);
 
+    }
 
     #[task(binds = GPIOTE, shared = [gpiote])]
     fn data_interrupt(mut cx: data_interrupt::Context) {
@@ -133,7 +138,6 @@ mod app {
                 read_data::spawn();
                 gpiote.channel0().reset_events();
             }
-
         });
     }
 }
