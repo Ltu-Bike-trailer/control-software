@@ -136,7 +136,8 @@ mod app {
         
         let mut msg = sender.dequeue().unwrap();
         msg.print_frame();
-        can_driver.transmit(&msg);
+        //can_driver.transmit(&msg);
+        defmt::info!("Waiting for Can Frame retreival from Master Node...");
 
         (Shared { gpiote }, Local {
             candriver: can_driver,
