@@ -16,16 +16,11 @@ use controller::drivers::MA732::*;
     device = nrf52840_hal::pac,
     dispatchers = [RTC1]
 )]
+
+
 mod app {
-    use core::f32;
-
-    use cortex_m::asm::delay;
-    use embedded_hal::{digital::{InputPin, OutputPin}, spi::SpiBus};
-    use nrf52840_hal::{self as hal, self, gpio::{p0::Parts, Floating, Input, Level, Output, Pin, PushPull}, spi::{self, Frequency, Spi}};
-
-    use nrf52840_hal::pac::{p0, SPI1};
-    use prelude::{ExtU64, Monotonic};
-    use rtic_monotonics::nrf::rtc::*;
+    use controller::drivers::{MA732::MA732Driver, MA732::MA732Register};
+    use nrf52840_hal::{gpio::{p0::Parts, Floating, Input, Level, Output, Pin, PushPull}, pac::SPI1, spi::{self, Frequency, Spi}, Clocks};
 
     use crate::Mono;
 
@@ -64,14 +59,18 @@ mod app {
         defmt::info!("pre-driver");
   
         let pins = spi::Pins {
-            sck: Some(sck),
+            sck:  Some(sck),
             miso: Some(miso),
             mosi: Some(mosi)
         };
        
         let spim: Spi<SPI1> = Spi::new(device.SPI1, pins, Frequency::K250, embedded_hal::spi::MODE_0);
 
-        blast::spawn().ok().unwrap();
+        let driver = MA732Driver::new(cs);
+
+        worker::spawn().unwrap();
+
+        //blast::spawn().ok().unwrap();
 
         (
             Shared {
@@ -79,10 +78,25 @@ mod app {
             },
             Local {
                 spim,
-                cs
+                driver
+               //cs
             },
         )
     }
+
+    #[task(local = [driver,spim],priority=2)]
+    async fn worker(cx:worker::Context) {
+        
+        let (driver, mut spim) = (cx.local.driver,cx.local.spim);
+
+        defmt::info!("Angle pre setting {:?}",  driver.read_angle(&mut spim));
+        defmt::info!("Read pre update {:?}",           driver.read_register::<Mono,_,_,_>( MA732Register::ZeroSetting1,&mut spim).await);
+                                                       driver.write_register(MA732Register::ZeroSetting1,&mut spim, 100);
+        defmt::info!("Read post update {:?}",          driver.read_register::<Mono,_,_,_>(MA732Register::ZeroSetting1,&mut spim).await);
+        defmt::info!("Angle post setting {:?}", driver.read_angle(&mut spim));
+
+    }
+
 
     // Optional idle, can be removed if not needed.
     #[idle]
@@ -90,11 +104,11 @@ mod app {
         defmt::info!("idle");
 
         loop {
-            blast::spawn().ok();
+            //blast::spawn().ok();
         }
     }
 
-
+    /*
     #[task(local = [spim, cs], priority = 2)]
     async fn blast(cx: blast::Context) -> () {
         defmt::info!("blast");
@@ -113,5 +127,5 @@ mod app {
         
         delay(10000000);
     }
-
+     */
 }
