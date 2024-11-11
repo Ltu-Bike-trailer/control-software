@@ -3,10 +3,16 @@
 //! This uses 3 pwm generators to drive the tansitors. It uses the drive pattern
 //! specified by matlab on some page. It uses the hal effect sensors to detect
 //! which state of the switching pattern we are in.
-#![allow(warnings, dead_code, unused_variables, unreachable_code)]
+#![allow(
+    warnings,
+    dead_code,
+    unused_variables,
+    unreachable_code,
+    internal_features
+)]
 #![no_main]
 #![no_std]
-#![feature(type_alias_impl_trait)]
+#![feature(type_alias_impl_trait, core_intrinsics)]
 #![deny(clippy::all)]
 #![deny(warnings)]
 
@@ -23,8 +29,9 @@ nrf_rtc0_monotonic!(Mono);
 mod app {
 
     use controller::{
-        bldc::{DrivePattern, FloatDuty},
+        bldc::{DrivePattern, FloatDuty, Pattern},
         cart,
+        RingBuffer,
     };
     use cortex_m::asm;
     //use embedded_hal::digital::InputPin;
@@ -53,7 +60,7 @@ mod app {
         velocity: f32,
         current: f32,
         dvel: (u64, u64),
-        pattern: ((bool, bool), (bool, bool), (bool, bool)),
+        pattern: Pattern,
         angle_acc: f32,
         target_davell: f32,
     }
@@ -75,6 +82,7 @@ mod app {
             rtic_sync::channel::Receiver<'static, ((bool, bool), (bool, bool), (bool, bool)), 10>,
         control_loop_timer: nrf52840_hal::timer::Timer<TIMER3, OneShot>,
         pid: controller::cart::controllers::MotorPidAlt,
+        buffer: RingBuffer<f32, 10>,
     }
 
     #[init]
@@ -181,6 +189,7 @@ mod app {
                 pattern_sender,
                 control_loop_timer,
                 pid,
+                buffer: RingBuffer::new([0.1, -0.05, 0.3, -0.1, 0.5, -0.15, 0.7, -0.2, 10., -1.]),
             },
         )
     }
@@ -320,26 +329,30 @@ mod app {
     ///
     /// This ensures that the velocity can be set without dependance on the rate
     /// of interrupts.
-    async fn motor_driver(mut cx: motor_driver::Context) {
+    async fn motor_driver(cx: motor_driver::Context) {
         let (phase1, phase2, phase3) = (cx.local.phase1, cx.local.phase2, cx.local.phase3);
-        let mut duty;
+        let mut duty = 0.;
         let ((mut p1h, mut p1l), (mut p2h, mut p2l), (mut p3h, mut p3l)) = Default::default();
+        let (mut shared_duty, mut pattern) = (cx.shared.duty, cx.shared.pattern);
         loop {
             let entry = Mono::now();
             loop {
                 if Mono::now() - entry > 100u64.millis::<1, 16_000_000>() {
                     ((p1h, p1l), (p2h, p2l), (p3h, p3l)) = Default::default();
-                    cx.shared.pattern.lock(|w| *w = Default::default());
+                    pattern.lock(|w| *w = Default::default());
                     break;
                 }
-                let res = cx.shared.pattern.lock(|w| *w);
+
+                let (res, shared_duty) =
+                    (&mut pattern, &mut shared_duty).lock(|w, duty| (w.clone(), duty.clone()));
+                let res = res.get(shared_duty);
+                duty = shared_duty;
                 if res != ((p1h, p1l), (p2h, p2l), (p3h, p3l)) {
                     ((p1h, p1l), (p2h, p2l), (p3h, p3l)) = res;
                     break;
                 }
                 Mono::delay(50u64.micros()).await;
             }
-            duty = cx.shared.duty.lock(|d| *d);
 
             //(&mut drive_pattern, &mut duty).lock(|pattern, duty| (pattern.get(), *duty));
             /*defmt::info!(
@@ -351,9 +364,6 @@ mod app {
                 p3h,
                 p3l
             );*/
-            debug_assert!(p1h != p1l || !p1h);
-            debug_assert!(p2h != p2l || !p2h);
-            debug_assert!(p3h != p3l || !p3h);
             match (p1h, p1l) {
                 (true, false) => {
                     phase1.disable_channel(pwm::Channel::C1);
@@ -429,6 +439,7 @@ mod app {
                 }
             };
             // defmt::info!("Setting {}", duty);
+            let duty = unsafe { core::intrinsics::fabsf32(duty) };
             phase1.set_duty(duty);
             phase2.set_duty(duty);
             phase3.set_duty(duty);
@@ -534,11 +545,11 @@ mod app {
         //defmt::info!("p {}, i {}, d {}", p, i, d);
         let actuation = p + i + d;
 
-        const MIN_DUTY: f32 = -0.35;
+        const MIN_DUTY: f32 = -1.0;
         const MAX_DUTY: f32 = 0.95;
         const RANGE: f32 = MAX_DUTY - MIN_DUTY;
         let actuation = (((actuation + 300.) * RANGE) / 600.) + MIN_DUTY;
-        let actuation = actuation.clamp(0., 1.);
+        let actuation = actuation.clamp(-1., 1.);
         // Target 500 mA
         // 1 Rad per second I guess.
         //cx.local.pid.register_measurement(dvel);
@@ -563,7 +574,7 @@ mod app {
         });
     }
 
-    #[task(shared = [angle_acc,duty,target_davell],priority = 2)]
+    #[task(shared = [angle_acc,duty,target_davell], local=[buffer],priority = 2)]
     /// Drives the phases of the motor.
     ///
     /// This is done by disabling the high/low side of each phase with respect
@@ -581,11 +592,11 @@ mod app {
             __rtic_internal_marker,
         } = cx.shared;
         let mut rec = (angle_acc, duty);
-        loop {
+        for reference in cx.local.buffer {
             let (acc, duty) = rec.lock(|acc, duty| (*acc, *duty));
-            target_davell.lock(|t| *t = -*t);
-            defmt::info!("Acceleration : {} {}", acc, duty);
-            Mono::delay(10u64.secs()).await;
+            target_davell.lock(|t: &mut f32| *t = reference);
+            defmt::info!("Acceleration : {} {}, following {}", acc, duty, reference);
+            Mono::delay(5u64.secs()).await;
         }
     }
 
