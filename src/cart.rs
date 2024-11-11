@@ -18,7 +18,7 @@ pub mod constants {
 
 /// Defines the controllers used in the cart.
 pub mod controllers {
-    use lib::pid::{Pid, PidFixedPoint};
+    use lib::pid::{Pid, PidF32};
 
     /// The Proportional gain for the motor.
     pub const MOTOR_KP: i32 = 1000;
@@ -27,7 +27,7 @@ pub mod controllers {
     /// The derivative gain for the motor.
     pub const MOTOR_KD: i32 = 5;
     /// Motor sample time in the [`MOTOR_TIMESCALE`] time-frame.
-    pub const MOTOR_TS: u32 = 5_000;
+    pub const MOTOR_TS: u32 = 1_000;
     /// Motor time resolution
     pub const MOTOR_TIMESCALE: i32 = 1_000_000;
     /// The decimal point in the controller.
@@ -58,7 +58,7 @@ pub mod controllers {
     /// The motor PID controller.
     ///
     /// This type makes it easier to change the controller without sideeffects.
-    pub type MotorPidAlt = PidFixedPoint<
+    pub type MotorPidAlt = PidF32<
         (),
         { MOTOR_KP as u64 },
         { MOTOR_KI as u64 },
@@ -71,7 +71,7 @@ pub mod controllers {
         0,
         // We will use uS as timescale.
         { MOTOR_TIMESCALE as i64 },
-        { 10i64.pow(MOTOR_FIXED_POINT) },
         1,
+        1000,
     >;
 }

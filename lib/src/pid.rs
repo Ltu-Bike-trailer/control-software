@@ -106,7 +106,27 @@ pub struct PidFixedPoint<
     integral: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM>,
     measurement: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM>,
 }
-
+/// This assumes that we have a i32 as data.
+pub struct PidF32<
+    Error: Debug,
+    const KP: u64,
+    const KI: u64,
+    const KD: u64,
+    const TS: u64,
+    const THRESHOLD_MAX: i32,
+    const THRESHOLD_MIN: i32,
+    const TIMESCALE: i64,
+    const FIXED_POINT_NOM: i64,
+    const FIXED_POINT_DENOM: i64,
+> {
+    err: PhantomData<Error>,
+    _out: u32,
+    reference: f32,
+    previous: f32,
+    // This might need to be changed in to i64 to not cause errors.
+    integral: f32,
+    measurement: f32,
+}
 /// This assumes that we have a i32 as data.
 pub struct PidDynamic<
     Error: Debug,
@@ -148,6 +168,153 @@ pub struct ControlInfo<Output: Sized> {
     pub d: Output,
     /// The output pre-threshold.
     pub pre_threshold: Output,
+}
+
+impl<
+        Error: Debug,
+        const KP: u64,
+        const KI: u64,
+        const KD: u64,
+        const TS: u64,
+        const THRESHOLD_MAX: i32,
+        const THRESHOLD_MIN: i32,
+        const TIMESCALE: i64,
+        const FIXED_POINT_NOM: i64,
+        const FIXED_POINT_DENOM: i64,
+    >
+    PidF32<
+        Error,
+        KP,
+        KI,
+        KD,
+        TS,
+        THRESHOLD_MAX,
+        THRESHOLD_MIN,
+        TIMESCALE,
+        FIXED_POINT_NOM,
+        FIXED_POINT_DENOM,
+    >
+where
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM } as usize]:,
+    [(); { FIXED_POINT_NOM * FIXED_POINT_DENOM } as usize]:,
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM }
+        as usize]:,
+    [(); { FIXED_POINT_NOM * FIXED_POINT_NOM } as usize]:,
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_NOM } as usize]:,
+    [(); { 1 * FIXED_POINT_NOM } as usize]:,
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM } as usize]:,
+    [(); { 1 * FIXED_POINT_DENOM } as usize]:,
+    [(); FIXED_POINT_DENOM as usize]:,
+    [(); FIXED_POINT_NOM as usize]:,
+{
+    const KD: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = FixedPoint::new(KD as i64);
+    const KI: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = FixedPoint::new(KI as i64);
+    const KP: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = FixedPoint::new(KP as i64);
+    const THRESHOLD_MAX: FixedPoint<1, 1> = FixedPoint::new(THRESHOLD_MAX as i64);
+    const THRESHOLD_MIN: FixedPoint<1, 1> = FixedPoint::new(THRESHOLD_MIN as i64);
+    const TS: FixedPoint<1, TIMESCALE> = FixedPoint::<1, TIMESCALE>::new(TS as i64).convert();
+    const TWO: FixedPoint<2, 1> = FixedPoint::<2, 1>::new(1).convert();
+
+    /// Creates a new controller that sets the output on the
+    /// [`Interface`](`Channel`) using a PID control strategy.
+    pub fn new() -> Self {
+        Self {
+            err: PhantomData,
+            reference: 0.,
+            previous: 0.,
+            integral: 0.,
+            measurement: 0.,
+            _out: 0,
+        }
+    }
+
+    /// Completely erases previous control signal.
+    #[inline(always)]
+    pub fn follow(&mut self, value: f32) {
+        self.reference = value;
+    }
+
+    /// Registers the most recent measurement.
+    #[inline(always)]
+    pub fn register_measurement(&mut self, value: f32) {
+        self.measurement = value;
+    }
+
+    /// Computes the control signal using a PID control strategy.
+    ///
+    /// if successful it returns the expected value and the read value.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the underlying [`Channel`] fails or
+    /// any numeric conversions fail.
+    #[inline(always)]
+    pub fn actuate(&mut self) -> Result<f32, ControllerError<Error>> {
+        let output = self.compute_output();
+        Ok(output)
+    }
+
+    /// Computes the latest control output.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the underlying [`Channel`] fails or
+    /// any numeric conversions fail.
+    #[inline(always)]
+    fn compute_output(&mut self) -> f32 {
+        // TODO: Remove all of the converts. The entire point of this is to not use
+        // that.
+        let target = self.reference;
+
+        let actual = self.measurement;
+
+        let error = target - actual;
+
+        let p = error * (Self::KP).into_float();
+        // Integral is approximated as a sum of discrete signals.
+        let avg = self.previous + error;
+        let avg = avg / Self::TWO.into_float();
+        let avg = avg * Self::TS.into_float();
+        self.integral = self
+            .integral
+            .add(avg)
+            .min(Self::THRESHOLD_MAX.into_float())
+            .max(Self::THRESHOLD_MIN.into_float());
+
+        let i: f32 = self.integral * Self::KI.into_float();
+
+        let d: f32 = error - self.previous;
+        let d: f32 = d / Self::TS.into_float();
+        let d: f32 = d * Self::KD.into_float();
+
+        let output: f32 = p + i + d;
+        let output = output.clamp(
+            Self::THRESHOLD_MIN.into_float(),
+            Self::THRESHOLD_MAX.into_float(),
+        );
+        output
+
+        /*
+
+        // Compute the rate of change between previous time-step and this time-step.
+        let d = kd * time_scale * (error - self.previous) / ts;
+
+        self.previous = error;
+
+        let output = ((p + i + d) / fixed_point)
+            .max(threshold_min)
+            .min(threshold_max);
+
+        ControlInfo {
+            reference: target,
+            measured: actual,
+            actuation: output,
+            p,
+            i,
+            d,
+            pre_threshold: (p + i + d) / fixed_point,
+        }*/
+    }
 }
 
 impl<
@@ -445,6 +612,8 @@ impl<const NOM: i64, const DENOM: i64> FixedPoint<NOM, DENOM> {
         if TNOM == NOM && DENOM == TDENOM {
             return FixedPoint { val: self.val };
         }
+
+        // a * b/c = d * e/f
         debug_assert!(NOM * TDENOM > TNOM * DENOM);
         let val = self.val * (NOM * TDENOM / (TNOM * DENOM));
         FixedPoint { val }
