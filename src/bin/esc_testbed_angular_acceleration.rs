@@ -38,7 +38,7 @@ mod app {
         timer::OneShot,
     };
     use rtic_monotonics::{
-        fugit::{ExtU32, Instant},
+        fugit::{ExtU32, ExtU64, Instant},
         Monotonic,
     };
 
@@ -52,7 +52,10 @@ mod app {
         duty: f32,
         velocity: f32,
         current: f32,
-        dvel: (f32, usize),
+        dvel: (u64, u64),
+        pattern: ((bool, bool), (bool, bool), (bool, bool)),
+        angle_acc: f32,
+        target_davell: f32,
     }
 
     // Local resources go here
@@ -71,7 +74,7 @@ mod app {
         pattern_receiver:
             rtic_sync::channel::Receiver<'static, ((bool, bool), (bool, bool), (bool, bool)), 10>,
         control_loop_timer: nrf52840_hal::timer::Timer<TIMER3, OneShot>,
-        pid: controller::cart::controllers::MotorPid,
+        pid: controller::cart::controllers::MotorPidAlt,
     }
 
     #[init]
@@ -143,11 +146,13 @@ mod app {
         timer.enable_interrupt();
         let mut control_loop_timer = timer.into_oneshot();
 
-        let pid = controller::cart::controllers::MotorPid::new(0.);
+        let mut pid = controller::cart::controllers::MotorPidAlt::new();
+        pid.follow(1.);
         control_loop_timer.timeout::<1, { cart::controllers::MOTOR_TIMESCALE as u32 }>(
             cart::controllers::MOTOR_TS.micros().into(),
         );
         motor_driver::spawn().ok().unwrap();
+        telemetry::spawn().ok().unwrap();
         //mono_sweep::spawn().ok().unwrap();
 
         (
@@ -158,7 +163,10 @@ mod app {
                 duty: 0.5,
                 velocity: 0.,
                 current: 0.,
-                dvel: (0., 0),
+                dvel: (0, 0),
+                pattern: Default::default(),
+                angle_acc: 0.,
+                target_davell: 0.3,
             },
             Local {
                 // Initialization of local resources go here
@@ -199,7 +207,9 @@ mod app {
 
         ],
         shared = [
-            dvel
+            dvel,
+            pattern,
+            angle_acc,
         ],
         priority = 5
     )]
@@ -264,11 +274,10 @@ mod app {
             }
         }
         //defmt::info!("Event");
-        let _ = cx
-            .local
-            .pattern_sender
-            .try_send(cx.local.drive_pattern.get())
-            .unwrap();
+
+        cx.shared
+            .pattern
+            .lock(|pattern| *pattern = cx.local.drive_pattern.get());
 
         if let Some(dt) = dt {
             let pt = cx.local.prev_vel_t.replace(now.clone());
@@ -277,19 +286,12 @@ mod app {
             }
             let pt = unsafe { pt.unwrap_unchecked() };
 
-            let dt = dt.to_micros() as f32 / 1_000_000.;
-            const FACTOR: f32 = core::f32::consts::TAU / 86.;
-            let avel = FACTOR / dt;
-            let dt = (now - pt).to_micros() as f32 / 1_000_000.;
-            let prev = cx.local.previous_avel.clone();
-            *cx.local.previous_avel = avel.clone();
-            let dvel = (avel - prev) / dt;
+            let dt = dt.to_micros();
+            let pt = (now - pt).to_micros();
+            cx.shared.dvel.lock(|dvel| *dvel = (dt, pt));
 
             // TODO! Manage negative velocities.
             //defmt::info!("Angular acc {}", dvel);
-            cx.shared
-                .dvel
-                .lock(|target| *target = (target.0 + dvel, target.1 + 1))
 
             /*let prev = cx.local.previous_avel.clone();
             *cx.local.previous_avel = avel.clone();
@@ -308,7 +310,7 @@ mod app {
         //defmt::info!("Got hal effect interrupt!");
     }
 
-    #[task(local = [phase1,phase2,phase3,pattern_receiver],shared = [duty],priority = 2)]
+    #[task(local = [phase1,phase2,phase3,pattern_receiver],shared = [duty,pattern],priority = 2)]
     /// Drives the phases of the motor.
     ///
     /// This is done by disabling the high/low side of each phase with respect
@@ -320,23 +322,25 @@ mod app {
     /// of interrupts.
     async fn motor_driver(mut cx: motor_driver::Context) {
         let (phase1, phase2, phase3) = (cx.local.phase1, cx.local.phase2, cx.local.phase3);
-        let mut duty = 0.;
+        let mut duty;
         let ((mut p1h, mut p1l), (mut p2h, mut p2l), (mut p3h, mut p3l)) = Default::default();
         loop {
-            if let Ok(mut val) = cx.local.pattern_receiver.try_recv() {
-                while let Ok(newval) = cx.local.pattern_receiver.try_recv() {
-                    val = newval;
+            let entry = Mono::now();
+            loop {
+                if Mono::now() - entry > 100u64.millis::<1, 16_000_000>() {
+                    ((p1h, p1l), (p2h, p2l), (p3h, p3l)) = Default::default();
+                    cx.shared.pattern.lock(|w| *w = Default::default());
+                    break;
                 }
-                ((p1h, p1l), (p2h, p2l), (p3h, p3l)) = val;
-                duty = cx.shared.duty.lock(|duty| duty.clone());
-                //defmt::info!("ZOOOM");
-            } else {
-                /*if duty > 50 {
-                    duty -= 1;
-                } else {
-                    duty = 0;
-                }*/
+                let res = cx.shared.pattern.lock(|w| *w);
+                if res != ((p1h, p1l), (p2h, p2l), (p3h, p3l)) {
+                    ((p1h, p1l), (p2h, p2l), (p3h, p3l)) = res;
+                    break;
+                }
+                Mono::delay(50u64.micros()).await;
             }
+            duty = cx.shared.duty.lock(|d| *d);
+
             //(&mut drive_pattern, &mut duty).lock(|pattern, duty| (pattern.get(), *duty));
             /*defmt::info!(
                 "Pattern Ah {}, Al {}, Bh {}, Bl {}, Ch {}, Cl {}",
@@ -366,7 +370,14 @@ mod app {
                     asm::nop();
                     phase1.disable_channel(pwm::Channel::C1);
                 }
-                _ => panic!("Tried to kill the system on phase 1 :("),
+                _ => {
+                    phase1.disable_channel(pwm::Channel::C0);
+                    phase1.disable_channel(pwm::Channel::C1);
+                    phase2.disable_channel(pwm::Channel::C0);
+                    phase2.disable_channel(pwm::Channel::C1);
+                    phase3.disable_channel(pwm::Channel::C0);
+                    phase3.disable_channel(pwm::Channel::C1);
+                }
             };
 
             match (p2h, p2l) {
@@ -385,7 +396,14 @@ mod app {
                     asm::nop();
                     phase2.disable_channel(pwm::Channel::C1);
                 }
-                _ => panic!("Tried to kill the system on phase 2 :("),
+                _ => {
+                    phase1.disable_channel(pwm::Channel::C0);
+                    phase1.disable_channel(pwm::Channel::C1);
+                    phase2.disable_channel(pwm::Channel::C0);
+                    phase2.disable_channel(pwm::Channel::C1);
+                    phase3.disable_channel(pwm::Channel::C0);
+                    phase3.disable_channel(pwm::Channel::C1);
+                }
             };
 
             match (p3h, p3l) {
@@ -401,15 +419,23 @@ mod app {
                     phase3.disable_channel(pwm::Channel::C0);
                     phase3.disable_channel(pwm::Channel::C1);
                 }
-                _ => panic!("Tried to kill the system on phase 3 :("),
+                _ => {
+                    phase1.disable_channel(pwm::Channel::C0);
+                    phase1.disable_channel(pwm::Channel::C1);
+                    phase2.disable_channel(pwm::Channel::C0);
+                    phase2.disable_channel(pwm::Channel::C1);
+                    phase3.disable_channel(pwm::Channel::C0);
+                    phase3.disable_channel(pwm::Channel::C1);
+                }
             };
+            // defmt::info!("Setting {}", duty);
             phase1.set_duty(duty);
             phase2.set_duty(duty);
             phase3.set_duty(duty);
-            duty *= 1.005;
+            /*duty *= 1.005;
             if duty >= 1. {
                 duty = 1.;
-            }
+            }*/
         }
     }
 
@@ -429,12 +455,17 @@ mod app {
     #[task(binds = TIMER3,
         local = [
             pid,
-            control_loop_timer
+            control_loop_timer,
+            previous_avel: f32 = 0.,
+            previous_dvel: f32 = 0.,
+            prev: f32 = 0.,
+            integral: f32 = 0.,
         ],
         shared = [
             duty,
             current,
-            dvel
+            dvel,angle_acc,
+            target_davell
         ],
         priority = 4,
     )]
@@ -451,6 +482,7 @@ mod app {
                 { controller::cart::controllers::MOTOR_TIMESCALE as u32 },
             >::from_ticks(controller::cart::controllers::MOTOR_TS as u64)
             .convert();
+        let target = cx.shared.target_davell.lock(|t| *t);
 
         /*let current = cx.shared.current.lock(|c| {
             let ret = c.clone();
@@ -458,42 +490,106 @@ mod app {
             ret
         });
         defmt::info!("Current : {} mA", current);*/
-        let (dvel, step) = cx.shared.dvel.lock(|t| {
-            let ret = t.clone();
-            *t = (0., 0);
-            ret
-        });
-        let dvel = (dvel / step as f32).clamp(-50., 50.);
+        let (dt, pt) = cx.shared.dvel.lock(|t| *t);
+        /* defmt::info!("dt : {}, pt : {}",dt,pt); */
+        let dt = dt as f32 / 1_000_000.;
+        const FACTOR: f32 = core::f32::consts::TAU / 86.;
+        let avel = FACTOR / dt;
+        let dt = pt as f32 / 1_000_000.;
+        let prev = cx.local.previous_avel.clone();
+        *cx.local.previous_avel = avel.clone();
+        let mut dvel = (avel - prev) / dt;
+
         //defmt::info!("Dvel {}", dvel);
+        //let mut dvel = dvel.clamp(-50., 50.);
+        if dvel.is_nan() || dvel.is_infinite() {
+            dvel = 0.;
+        }
+        let dvel = dvel.clamp(-5., 5.);
+
+        const KP: f32 = 100.;
+        const KI: f32 = 10.;
+        const KD: f32 = 1.;
+        let del = dvel - *cx.local.previous_dvel;
+
+        // TODO: Remove this ful-hack if at all possible.
+        const RATE_LIMIT: f32 = 0.1;
+        let dvel = match (del > RATE_LIMIT, del < RATE_LIMIT) {
+            (true, false) => *cx.local.previous_dvel + RATE_LIMIT,
+            (false, true) => *cx.local.previous_dvel - RATE_LIMIT,
+            _ => dvel,
+        };
+        *cx.local.previous_dvel = dvel;
+        let err = target - dvel;
+
+        let p = (KP * err).clamp(-100., 100.);
+        let i = (*cx.local.prev + err / 2.) * (DURATION.to_micros() as f32 / 1_000_000.);
+        *cx.local.integral = (*cx.local.integral + i).clamp(-100., 100.);
+        let i = KD * *cx.local.integral;
+        let d = KD
+            * ((err - *cx.local.prev) / (DURATION.to_micros() as f32 / 1_000_000.))
+                .clamp(-100., 100.);
+        *cx.local.prev = err;
+
+        //defmt::info!("p {}, i {}, d {}", p, i, d);
+        let actuation = p + i + d;
+
+        const MIN_DUTY: f32 = -0.35;
+        const MAX_DUTY: f32 = 0.95;
+        const RANGE: f32 = MAX_DUTY - MIN_DUTY;
+        let actuation = (((actuation + 300.) * RANGE) / 600.) + MIN_DUTY;
+        let actuation = actuation.clamp(0., 1.);
         // Target 500 mA
         // 1 Rad per second I guess.
-        cx.local.pid.follow(10.);
-        cx.local
-            .pid
-            .register_measurement(dvel, controller::cart::controllers::MOTOR_TS);
+        //cx.local.pid.register_measurement(dvel);
         // This is fine. The only time this throws an error is if the u16 fails to write
         // which it never does.
-        let actuation = unsafe { cx.local.pid.actuate().unwrap_unchecked() };
-        defmt::info!(
-            "Actuation : {}/ {}\n\tP {}, I {}, D {}",
-            actuation.actuation,
-            100.,
-            actuation.p,
-            actuation.i,
-            actuation.d
-        );
-        cx.shared
-            .duty
-            .lock(|duty| *duty = actuation.actuation / 100.);
+        //let actuation = unsafe { cx.local.pid.actuate().unwrap_unchecked() };
+        /* defmt::info!("Actuation : {} / {}", actuation, 100.,); */
+        cx.shared.duty.lock(|duty| *duty = actuation);
 
+        cx.shared.angle_acc.lock(|acc| *acc = dvel);
+        const RTC_DURATION: rtic_monotonics::fugit::Duration<u64, 1, 32768> =
+            rtic_monotonics::fugit::Duration::<
+                u64,
+                1,
+                { controller::cart::controllers::MOTOR_TIMESCALE as u32 },
+            >::from_ticks(controller::cart::controllers::MOTOR_TS as u64)
+            .convert();
         timer.timeout(unsafe {
-            (start + DURATION.convert())
+            (start + RTC_DURATION)
                 .checked_duration_since(Mono::now())
                 .unwrap_unchecked()
         });
     }
 
-    #[task(binds = SAADC, local=[current_sense,n:i32 = 0],shared =[current],priority=6)]
+    #[task(shared = [angle_acc,duty,target_davell],priority = 2)]
+    /// Drives the phases of the motor.
+    ///
+    /// This is done by disabling the high/low side of each phase with respect
+    /// to the switching pattern.
+    ///
+    /// This function should only be called by the PID controller.
+    ///
+    /// This ensures that the velocity can be set without dependance on the rate
+    /// of interrupts.
+    async fn telemetry(cx: telemetry::Context) {
+        let telemetry::SharedResources {
+            angle_acc,
+            duty,
+            mut target_davell,
+            __rtic_internal_marker,
+        } = cx.shared;
+        let mut rec = (angle_acc, duty);
+        loop {
+            let (acc, duty) = rec.lock(|acc, duty| (*acc, *duty));
+            target_davell.lock(|t| *t = -*t);
+            defmt::info!("Acceleration : {} {}", acc, duty);
+            Mono::delay(10u64.secs()).await;
+        }
+    }
+
+    #[task(binds = SAADC, local=[current_sense,n:i32 = 0],shared =[current],priority=1)]
     /// Continuously samples the current.
     ///
     /// If there is not recipient the value is merely averaged with the previous
