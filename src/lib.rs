@@ -28,6 +28,9 @@ pub mod cart;
 use defmt_rtt as _;
 use panic_probe as _;
 pub mod boards;
+pub mod gain_scheduled;
+pub mod pid;
+pub mod wrapper;
 pub mod drivers;
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message
