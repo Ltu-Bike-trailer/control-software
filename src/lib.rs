@@ -23,11 +23,9 @@ pub mod cart;
 //pub mod svm;
 
 use defmt_rtt as _;
-
 use panic_probe as _;
 pub mod boards;
 pub mod drivers;
-
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message
 // this prevents the panic message being printed *twice* when `defmt::panic` is
@@ -38,7 +36,7 @@ extern "C" fn _defmt_panic() -> ! {
     cortex_m::asm::udf()
 }
 
-    /* 
+/*
 #[panic_handler]
 #[allow(elided_lifetimes_in_paths)]
 #[unsafe(no_mangle)]
@@ -87,5 +85,46 @@ impl<Item: Sized + Clone, const SIZE: usize> Iterator for OwnedItterator<Item, S
         let item = self.buff[self.ptr].clone();
         self.ptr += 1;
         Some(item)
+    }
+}
+
+/// Provides a simple rung buffer. This is used to set reference signals while
+/// testing the cart.
+pub struct RingBuffer<T: Sized + Clone + Copy, const N: usize> {
+    data: [T; N],
+    ptr: usize,
+}
+
+impl<T: Sized + Clone + Copy, const N: usize> RingBuffer<T, N> {
+    /// Creates a new ring buffer using the `buffer` provided.
+    /// 
+    /// ## Panics
+    /// 
+    /// This function panics if the buffer is empty.
+    #[must_use]
+    #[inline(always)]
+    pub const fn new(buffer: [T; N]) -> Self {
+        assert!(N != 0);
+        Self {
+            data: buffer,
+            ptr: 0,
+        }
+    }
+}
+
+impl<T: Sized + Clone + Copy, const N: usize> Iterator for RingBuffer<T, N> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.data.get(self.ptr) {
+            Some(value) => {
+                self.ptr += 1;
+                Some(*value)
+            }
+            _ => {
+                self.ptr = 0;
+                Some(self.data[0])
+            }
+        }
     }
 }

@@ -24,7 +24,8 @@ impl<T: Instance> FloatDuty for Pwm<T> {
 /// Denotes the pattern in which we drive the BLDC motors on the ESC.
 #[derive(Default)]
 pub struct DrivePattern {
-    pattern: [u8; 8],
+    cw_pattern: [u8; 8],
+    ccw_pattern: [u8; 8],
     idx: usize,
 }
 
@@ -34,7 +35,33 @@ impl DrivePattern {
     pub const fn new() -> Self {
         Self {
             idx: 0,
-            pattern: [
+            ccw_pattern: [
+                0b00_00_00, // Initally assume that we are in 100 state. This allows initial
+                // driving of the motor. it might cost a litle extra current but this should be
+                // fine.
+
+                // Matlab version :/
+                0b00_10_01, // 0b001
+                0b10_01_00, // 0b010
+                0b10_00_01, // 0b011
+                0b01_00_10, // 0b100
+                0b01_10_00, // 0b101
+                0b00_01_10, // 0b110
+                // micro chip version
+                /*
+                0b01_00_10, // 0b001
+                0b00_10_01, // 0b010
+                0b01_10_00, // 0b011
+                0b10_01_00, // 0b100
+                0b00_01_10, // 0b101
+                0b10_00_01, // 0b110
+                */
+                // micro chip version ccw
+                //0b10_00_01, 0b00_01_10, 0b10_01_00, 0b01_10_00, 0b00_10_01, 0b01_00_10,
+                // Needed because the hal effects are funky
+                0b00_01_10,
+            ],
+            cw_pattern: [
                 0b00_00_00, // Initally assume that we are in 100 state. This allows initial
                 // driving of the motor. it might cost a litle extra current but this should be
                 // fine.
@@ -117,6 +144,7 @@ impl DrivePattern {
     }
 
     #[inline(always)]
+    #[must_use]
     /// Forces the motor to advance to the next step in commutation.
     pub fn previous(&mut self) {
         self.idx = match self.idx {
@@ -132,24 +160,57 @@ impl DrivePattern {
     }
 
     /// Returns the current switching pattern.
-    pub fn get(&self) -> ((bool, bool), (bool, bool), (bool, bool)) {
+    #[must_use]
+    #[inline(always)]
+    pub fn get(&self) -> Pattern {
         //debug_assert!(self.idx <= 0b110);
-        let pattern = self.pattern[self.idx];
-        (
-            (pattern & 0b100000 != 0, pattern & 0b10000 != 0),
-            (pattern & 0b1000 != 0, pattern & 0b100 != 0),
-            (pattern & 0b10 != 0, pattern & 0b1 != 0),
-        )
+        Pattern(self.cw_pattern[self.idx], self.ccw_pattern[self.idx])
     }
 
     /// Returns the latest state as a u8.
+    #[must_use]
+    #[inline(always)]
     pub fn get_pattern_u8(&self) -> u8 {
-        unsafe { *self.pattern.get_unchecked(self.idx) }
+        unsafe { *self.ccw_pattern.get_unchecked(self.idx) }
     }
 
     #[allow(clippy::cast_possible_truncation)]
     /// Returns the current state.
     pub fn get_state(&self) -> u8 {
         self.idx as u8
+    }
+}
+
+/// A simple named tuple that allows the user to change directions.
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+pub struct Pattern(u8, u8);
+
+impl Default for Pattern {
+    fn default() -> Self {
+        Self(0, 0)
+    }
+}
+
+impl Pattern {
+    #[inline(always)]
+    #[must_use]
+    /// A simple named tuple that allows the user to change directions.
+    pub fn get(self, duty: f32) -> ((bool, bool), (bool, bool), (bool, bool)) {
+        if duty >= 0. {
+            return Self::conv(self.0);
+        }
+        //Self::conv(self.1)
+        // This should provide breaking.
+        ((false, true), (false, true), (false, true))
+    }
+
+    #[must_use]
+    const fn conv(pattern: u8) -> ((bool, bool), (bool, bool), (bool, bool)) {
+        (
+            (pattern & 0b100000 != 0, pattern & 0b10000 != 0),
+            (pattern & 0b1000 != 0, pattern & 0b100 != 0),
+            (pattern & 0b10 != 0, pattern & 0b1 != 0),
+        )
     }
 }
