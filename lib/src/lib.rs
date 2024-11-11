@@ -43,7 +43,8 @@
     const_trait_impl,
     generic_associated_types_extended,
     generic_const_items,
-    generic_arg_infer
+    generic_arg_infer,
+    adt_const_params
 )]
 #![cfg_attr(not(feature = "std"), no_std, allow(internal_features))]
 pub mod constants;
