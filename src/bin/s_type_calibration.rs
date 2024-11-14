@@ -18,10 +18,16 @@ nrf_timer4_monotonic!(Mono, 16_000_000);
     dispatchers = [RTC0,TIMER1]
 )]
 mod app {
+
+    use cortex_m::asm;
     //use embedded_hal::digital::InputPin;
     use nrf52840_hal::{
-        saadc::{SaadcConfig, Time},
-        Saadc,
+        gpio::{p0::P0_29, Disconnected},
+        saadc::{Channel, SaadcConfig, SaadcTask, Time},
+    };
+    use rtic_monotonics::{
+        fugit::{Duration, ExtU32},
+        Monotonic,
     };
 
     use crate::Mono;
@@ -51,16 +57,24 @@ mod app {
         cfg.reference = nrf52840_hal::saadc::Reference::INTERNAL;
 
         // The input pin.
-        let mut input = p0.p0_29;
+        let input = p0.p0_29;
 
-        let mut adc = Saadc::new(cx.device.SAADC, cfg);
+        let mut adc = SaadcTask::new(cx.device.SAADC, cfg, &[P0_29::<Disconnected>::channel()], [
+            0,
+        ]);
 
+        let  delay: Duration<u32, 1, 16_000_000> = 100u32.millis();
         // Hack to stop rustc being mad.
         if true {
             loop {
-                let ret = adc.read_channel(&mut input).unwrap();
-                // We only measure positive values.
-                let measured = conv(ret as u16);
+                let ret = adc.start_sample();
+                let time = Mono::now();
+                // Block until it should be done.
+                while (Mono::now() - time) < delay {
+                    asm::nop();
+                }
+                let [measured] = adc.complete_sample(conv);
+
                 // Scale in between.
                 const GAIN: f32 = 10.;
                 let converted = GAIN * measured;
