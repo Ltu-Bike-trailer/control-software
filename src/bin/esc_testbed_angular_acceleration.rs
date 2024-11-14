@@ -471,6 +471,7 @@ mod app {
             previous_dvel: f32 = 0.,
             prev: f32 = 0.,
             integral: f32 = 0.,
+            started:u32 = 0
         ],
         shared = [
             duty,
@@ -506,6 +507,30 @@ mod app {
         let dt = dt as f32 / 1_000_000.;
         const FACTOR: f32 = core::f32::consts::TAU / 86.;
         let avel = FACTOR / dt;
+
+        if unsafe { core::intrinsics::fabsf32(avel) } > 0.1 && *cx.local.started < 10 {
+            *cx.local.started += 1;
+        } else if unsafe { core::intrinsics::fabsf32(avel) } <= 0.1 && *cx.local.started >= 3 {
+            *cx.local.started -= 1;
+        } else {
+            *cx.local.started = 0;
+        }
+        if unsafe { core::intrinsics::fabsf32(avel) } < 0.1 || *cx.local.started < 3 {
+            *cx.local.previous_avel = avel;
+            const RTC_DURATION: rtic_monotonics::fugit::Duration<u64, 1, 32768> =
+                rtic_monotonics::fugit::Duration::<
+                    u64,
+                    1,
+                    { controller::cart::controllers::MOTOR_TIMESCALE as u32 },
+                >::from_ticks(controller::cart::controllers::MOTOR_TS as u64)
+                .convert();
+            timer.timeout(unsafe {
+                (start + RTC_DURATION)
+                    .checked_duration_since(Mono::now())
+                    .unwrap_unchecked()
+            });
+            return;
+        }
         let dt = pt as f32 / 1_000_000.;
         let prev = cx.local.previous_avel.clone();
         *cx.local.previous_avel = avel.clone();
