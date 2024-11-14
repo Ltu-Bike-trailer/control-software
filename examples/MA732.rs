@@ -91,7 +91,7 @@ mod app {
 
         defmt::info!("Angle pre setting {:?}",  driver.read_angle(&mut spim));
         defmt::info!("Read pre update {:?}",           driver.read_register::<Mono,_,_,_>( MA732Register::ZeroSetting1,&mut spim).await);
-                                                       driver.write_register(MA732Register::ZeroSetting1,&mut spim, 100);
+                                                       driver.write_register::<Mono,_,_,_>(MA732Register::ZeroSetting1,&mut spim, 100).await;
         defmt::info!("Read post update {:?}",          driver.read_register::<Mono,_,_,_>(MA732Register::ZeroSetting1,&mut spim).await);
         defmt::info!("Angle post setting {:?}", driver.read_angle(&mut spim));
 

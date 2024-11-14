@@ -1,7 +1,10 @@
+use core::f32;
+
 use embedded_hal::{digital::OutputPin, spi::SpiBus};
 use rtic_monotonics::{fugit::ExtU64, Monotonic};
+
 ///Struct containing the needed pins to drive MA732 sensor.
-pub struct MA732Driver</*SPI: SpiBus,*/ PIN: OutputPin> {
+pub struct MA732Driver</* SPI: SpiBus, */ PIN: OutputPin> {
     /// Spi configured with MISO, MOSI and clk pins.
     // pub spi: SPI,
     /// Chip-Select Pin, for driving the pin from high to low
@@ -41,24 +44,36 @@ pub enum MA732Register {
     MghMgl = 0x1B,
 }
 
-impl</*SPI: SpiBus,*/ PIN: OutputPin> MA732Driver<PIN> {
+/// default register values
+const ZERO_SETTING1: u8 = 0b0000_0000;
+const ZERO_SETTING2: u8 = 0b0000_0000;
+const BIAS_CURRENT_TRIMMING: u8 = 0b0000_0000;
+//0x3 = 0b0000_0000,
+//0x4 = 0b1100_0000,
+//0x5 = 0b1111_1111,
+//0x6 = 0b0001_1100,
+const ROTATION_DIRECTION: u8 = 0b0000_0000;
+//0xE = 0b0111_0111,
+//0x10= 0b1001_1100,
+
+impl</* SPI: SpiBus, */ PIN: OutputPin> MA732Driver<PIN> {
     /// Inits a new instance taking ownership of the needed pints
     /// TODO spi should be shared for multible instances, or chip select should
     /// maybe be passed to the read/write commands to make it able to point to
     /// multiple senores.
-    pub fn new( cs: PIN) -> Self {
+    pub fn new(cs: PIN) -> Self {
         Self { cs }
     }
 
     /// reads the angle from the MA732 sensor
     /// caution there needs to be at least 150ns between polls of this
-    pub fn read_angle<SPI:SpiBus>(&mut self, spi: &mut SPI,) -> u16 {
+    pub fn read_angle<SPI: SpiBus>(&mut self, spi: &mut SPI) -> f32 {
         let mut angle: [u8; 2] = [0; 2];
         self.cs.set_low().ok();
         spi.read(&mut angle).ok();
         self.cs.set_high().ok();
 
-        return u16::from_be_bytes(angle);
+        return u16_to_radians(u16::from_be_bytes(angle));
     }
 
     /// Reads a specified register
@@ -96,7 +111,17 @@ impl</*SPI: SpiBus,*/ PIN: OutputPin> MA732Driver<PIN> {
     }
 
     /// writes a new value to a specified register
-    pub fn write_register<SPI:SpiBus>(&mut self, register: MA732Register, spi: &mut SPI, new_value: u8) {
+    pub async fn write_register<
+        T: Monotonic<Duration = rtic_monotonics::fugit::Duration<u64, NOM, DENOM>>,
+        SPI: SpiBus,
+        const NOM: u32,
+        const DENOM: u32,
+    >(
+        &mut self,
+        register: MA732Register,
+        spi: &mut SPI,
+        new_value: u8,
+    ) {
         //|Instruction Command 3 bits|Register 5 bits| new value 8 bits|
         // Shift and combine above data into 2 [u8;2]
         let write: [u8; 2] = [
@@ -108,5 +133,65 @@ impl</*SPI: SpiBus,*/ PIN: OutputPin> MA732Driver<PIN> {
         self.cs.set_low().ok();
         spi.transfer(&mut [0; 2], &write).ok();
         self.cs.set_high().ok();
+
+        //Delay to prevent issues from happen in the case of chained instructions
+        T::delay(20.millis()).await;
     }
+
+    // ============ Common register actions pre coded ============
+
+    /// Sets new zero to given angle in radians
+    pub async fn set_zero<
+        T: Monotonic<Duration = rtic_monotonics::fugit::Duration<u64, NOM, DENOM>>,
+        SPI: SpiBus,
+        const NOM: u32,
+        const DENOM: u32,
+    >(
+        &mut self,
+        angle_offset: f32,
+        spi: &mut SPI,
+    ) {
+        //convert angle from radians to 16bit representation and write to the registers
+        let zero_angle: [u8; 2] = radians_to_u16(angle_offset).to_be_bytes();
+
+        self.write_register::<T, SPI, NOM, DENOM>(MA732Register::ZeroSetting1, spi, zero_angle[0])
+            .await;
+        self.write_register::<T, SPI, NOM, DENOM>(MA732Register::ZeroSetting2, spi, zero_angle[1])
+            .await;
+    }
+
+    /// resets all registers to default
+    pub async fn reset_registers<
+        T: Monotonic<Duration = rtic_monotonics::fugit::Duration<u64, NOM, DENOM>>,
+        SPI: SpiBus,
+        const NOM: u32,
+        const DENOM: u32,
+    >(
+        &mut self,
+        spi: &mut SPI,
+    ) {
+        //convert angle from radians to 16bit representation and write to the registers
+        //let zero_angle: [u8; 2] = radians_to_u16(angle_offset).to_be_bytes();
+
+        self.write_register::<T, SPI, NOM, DENOM>(MA732Register::ZeroSetting1, spi, ZERO_SETTING1)
+            .await;
+        self.write_register::<T, SPI, NOM, DENOM>(MA732Register::ZeroSetting2, spi, ZERO_SETTING2)
+            .await;
+        self.write_register::<T, SPI, NOM, DENOM>(
+            MA732Register::BiasCurrentTrimming,
+            spi,
+            BIAS_CURRENT_TRIMMING,
+        )
+        .await;
+        self.write_register::<T, SPI, NOM, DENOM>(MA732Register::RotationDIrection, spi, ROTATION_DIRECTION)
+            .await;
+    }
+}
+
+fn radians_to_u16(radians: f32) -> u16 {
+    ((radians / f32::consts::TAU) * u16::MAX as f32) as u16
+}
+
+fn u16_to_radians(angle: u16) -> f32 {
+    angle as f32 / u16::MAX as f32 * f32::consts::TAU
 }
