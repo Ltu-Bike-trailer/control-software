@@ -298,25 +298,7 @@ mod app {
             let dt = dt.to_micros();
             let pt = (now - pt).to_micros();
             cx.shared.dvel.lock(|dvel| *dvel = (dt, pt));
-
-            // TODO! Manage negative velocities.
-            //defmt::info!("Angular acc {}", dvel);
-
-            /*let prev = cx.local.previous_avel.clone();
-            *cx.local.previous_avel = avel.clone();
-
-            let dvel = (avel - prev) / dt;
-            defmt::info!("{}", dvel);
-            cx.shared.dvel.lock(|target| {
-                *target = ((target.0 + dvel) / 2., now.duration_since_epoch().to_micros())
-            });*/
         }
-        // Trigger the phases inline since we want to run it as fast as
-        // possible.
-        //
-        // Doing it this way ensures that we never miss a state, given that the
-        // app is schedulable.
-        //defmt::info!("Got hal effect interrupt!");
     }
 
     #[task(local = [phase1,phase2,phase3,pattern_receiver],shared = [duty,pattern],priority = 2)]
@@ -353,17 +335,6 @@ mod app {
                 }
                 Mono::delay(50u64.micros()).await;
             }
-
-            //(&mut drive_pattern, &mut duty).lock(|pattern, duty| (pattern.get(), *duty));
-            /*defmt::info!(
-                "Pattern Ah {}, Al {}, Bh {}, Bl {}, Ch {}, Cl {}",
-                p1h,
-                p1l,
-                p2h,
-                p2l,
-                p3h,
-                p3l
-            );*/
             match (p1h, p1l) {
                 (true, false) => {
                     phase1.disable_channel(pwm::Channel::C1);
@@ -438,15 +409,10 @@ mod app {
                     phase3.disable_channel(pwm::Channel::C1);
                 }
             };
-            // defmt::info!("Setting {}", duty);
             let duty = unsafe { core::intrinsics::fabsf32(duty) };
             phase1.set_duty(duty);
             phase2.set_duty(duty);
             phase3.set_duty(duty);
-            /*duty *= 1.005;
-            if duty >= 1. {
-                duty = 1.;
-            }*/
         }
     }
 
@@ -481,8 +447,8 @@ mod app {
         ],
         priority = 4,
     )]
+    /// Runs the PID control loop for constant torque.
     fn control_loop(mut cx: control_loop::Context) {
-        //defmt::info!("Control loop");
         let start: rtic_monotonics::fugit::Instant<u64, 1, 32_768> = Mono::now();
         let timer = cx.local.control_loop_timer;
         timer.reset_event();
@@ -496,14 +462,7 @@ mod app {
             .convert();
         let target = cx.shared.target_davell.lock(|t| *t);
 
-        /*let current = cx.shared.current.lock(|c| {
-            let ret = c.clone();
-            *c = f32::NEG_INFINITY;
-            ret
-        });
-        defmt::info!("Current : {} mA", current);*/
         let (dt, pt) = cx.shared.dvel.lock(|t| *t);
-        /* defmt::info!("dt : {}, pt : {}",dt,pt); */
         let dt = dt as f32 / 1_000_000.;
         const FACTOR: f32 = core::f32::consts::TAU / 86.;
         let avel = FACTOR / dt;
@@ -536,8 +495,6 @@ mod app {
         *cx.local.previous_avel = avel.clone();
         let mut dvel = (avel - prev) / dt;
 
-        //defmt::info!("Dvel {}", dvel);
-        //let mut dvel = dvel.clamp(-50., 50.);
         if dvel.is_nan() || dvel.is_infinite() {
             dvel = 0.;
         }
@@ -567,7 +524,6 @@ mod app {
                 .clamp(-100., 100.);
         *cx.local.prev = err;
 
-        //defmt::info!("p {}, i {}, d {}", p, i, d);
         let actuation = p + i + d;
 
         const MIN_DUTY: f32 = -1.0;
@@ -575,13 +531,6 @@ mod app {
         const RANGE: f32 = MAX_DUTY - MIN_DUTY;
         let actuation = (((actuation + 300.) * RANGE) / 600.) + MIN_DUTY;
         let actuation = actuation.clamp(-1., 1.);
-        // Target 500 mA
-        // 1 Rad per second I guess.
-        //cx.local.pid.register_measurement(dvel);
-        // This is fine. The only time this throws an error is if the u16 fails to write
-        // which it never does.
-        //let actuation = unsafe { cx.local.pid.actuate().unwrap_unchecked() };
-        /* defmt::info!("Actuation : {} / {}", actuation, 100.,); */
         cx.shared.duty.lock(|duty| *duty = actuation);
 
         cx.shared.angle_acc.lock(|acc| *acc = dvel);
@@ -600,15 +549,7 @@ mod app {
     }
 
     #[task(shared = [angle_acc,duty,target_davell], local=[buffer],priority = 2)]
-    /// Drives the phases of the motor.
-    ///
-    /// This is done by disabling the high/low side of each phase with respect
-    /// to the switching pattern.
-    ///
-    /// This function should only be called by the PID controller.
-    ///
-    /// This ensures that the velocity can be set without dependance on the rate
-    /// of interrupts.
+    /// Sends telemetry data over the rtt channel at a fixed rate.
     async fn telemetry(cx: telemetry::Context) {
         let telemetry::SharedResources {
             angle_acc,
