@@ -1,6 +1,5 @@
 #![allow(clippy::future_not_send)]
 use core::f32;
-
 use embedded_hal::{digital::OutputPin, spi::SpiBus};
 use rtic_monotonics::{fugit::ExtU64, Monotonic};
 
