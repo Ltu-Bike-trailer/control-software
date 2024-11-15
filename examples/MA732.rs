@@ -19,7 +19,7 @@ use controller::drivers::MA732::*;
 
 
 mod app {
-    use controller::drivers::{MA732::MA732Driver, MA732::MA732Register};
+    use controller::drivers::{MA732::Driver, MA732::Register};
     use nrf52840_hal::{gpio::{p0::Parts, Floating, Input, Level, Output, Pin, PushPull}, pac::SPI1, spi::{self, Frequency, Spi}, Clocks};
 
     use crate::Mono;
@@ -66,7 +66,7 @@ mod app {
        
         let spim: Spi<SPI1> = Spi::new(device.SPI1, pins, Frequency::K250, embedded_hal::spi::MODE_0);
 
-        let driver = MA732Driver::new(cs);
+        let driver = Driver::new(cs);
 
         worker::spawn().unwrap();
 
@@ -90,9 +90,9 @@ mod app {
         let (driver, mut spim) = (cx.local.driver,cx.local.spim);
 
         defmt::info!("Angle pre setting {:?}",  driver.read_angle(&mut spim));
-        defmt::info!("Read pre update {:?}",           driver.read_register::<Mono,_,_,_>( MA732Register::ZeroSetting1,&mut spim).await);
-                                                       driver.write_register::<Mono,_,_,_>(MA732Register::ZeroSetting1,&mut spim, 100).await;
-        defmt::info!("Read post update {:?}",          driver.read_register::<Mono,_,_,_>(MA732Register::ZeroSetting1,&mut spim).await);
+        defmt::info!("Read pre update {:?}",           driver.read_register::<Mono,_,_,_>(Register::ZeroSetting1,&mut spim).await);
+                                                       driver.write_register::<Mono,_,_,_>(Register::ZeroSetting1,&mut spim, 100).await;
+        defmt::info!("Read post update {:?}",          driver.read_register::<Mono,_,_,_>(Register::ZeroSetting1,&mut spim).await);
         defmt::info!("Angle post setting {:?}", driver.read_angle(&mut spim));
 
     }
