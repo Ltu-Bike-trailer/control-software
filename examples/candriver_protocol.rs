@@ -11,6 +11,8 @@ use nrf52840_hal as _;
 use nrf52840_hal::gpio::{Level, Port};
 use panic_probe as _;
 use rtic::app;
+use rtic_monotonics::nrf_rtc0_monotonic; // global logger + panicking-behavior + memory layout
+nrf_rtc0_monotonic!(Mono);
 
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC0])]
 mod app {
@@ -42,11 +44,6 @@ mod app {
         spim,
         spim::*,
         Clocks,
-    };
-    use rtic_monotonics::nrf::{
-        self,
-        rtc::*,
-        timer::{fugit::ExtU64, Timer0 as Mono},
     };
 
     #[shared]
@@ -193,7 +190,7 @@ mod app {
 
     #[task(binds = GPIOTE, shared = [gpiote], local = [candriver, candriver_node, sender])]
     fn can_interrupt(mut cx: can_interrupt::Context) {
-        let handle = cx.shared.gpiote.lock(|gpiote| {
+        cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
                 defmt::println!("\n");
                 defmt::info!("GPIOTE interrupt occurred [channel 0] - Can Master!");
