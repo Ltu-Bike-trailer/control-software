@@ -19,12 +19,10 @@
     clippy::inline_always,
     incomplete_features
 )]
-
 use core::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(feature = "esc")]
 pub mod bldc;
 pub mod cart;
-//pub mod svm;
 
 use defmt_rtt as _;
 use panic_probe as _;
