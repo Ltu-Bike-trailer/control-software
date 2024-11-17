@@ -95,10 +95,6 @@ mod etc {
         phase2: Pwm<PWM1>,
         phase3: Pwm<PWM2>,
         drive_pattern: DrivePattern,
-        pattern_sender:
-            rtic_sync::channel::Sender<'static, ((bool, bool), (bool, bool), (bool, bool)), 10>,
-        pattern_receiver:
-            rtic_sync::channel::Receiver<'static, ((bool, bool), (bool, bool), (bool, bool)), 10>,
         control_loop_timer: nrf52840_hal::timer::Timer<TIMER3, OneShot>,
         buffer: RingBuffer<f32, 10>,
     }
@@ -154,8 +150,6 @@ mod etc {
 
         let sender = protocol::sender::Sender::new();
         debug_assert!(Mono::now().duration_since_epoch().to_micros() != 0);
-        let (pattern_sender, pattern_receiver) =
-            rtic_sync::make_channel!(((bool, bool), (bool, bool), (bool, bool)), 10);
 
         // Spawn the tasks.
         let mut timer = nrf52840_hal::timer::Timer::new(cx.device.TIMER3);
@@ -191,8 +185,6 @@ mod etc {
                 phase2,
                 phase3,
                 drive_pattern,
-                pattern_receiver,
-                pattern_sender,
                 control_loop_timer,
                 buffer: RingBuffer::new([0.1, -0.05, 0.3, -0.1, 0.5, -0.15, 0.7, -0.2, 10., -1.]),
             },
@@ -256,33 +248,21 @@ mod etc {
             match event {
                 GpioEvents::P1HalRising => {
                     cx.local.drive_pattern.set_a();
-                    cx.local
-                        .prev
-                        .0
-                        .replace(now.clone())
-                        .map(|el| dt = Some(now - el));
+                    dt = cx.local.prev.0.replace(now).map(|el| Some(now - el));
                 }
                 GpioEvents::P1HalFalling => {
                     cx.local.drive_pattern.clear_a();
                 }
                 GpioEvents::P2HalRising => {
                     cx.local.drive_pattern.set_b();
-                    cx.local
-                        .prev
-                        .1
-                        .replace(now.clone())
-                        .map(|el| dt = Some(now - el));
+                    dt = cx.local.prev.1.replace(now).map(|el| Some(now - el));
                 }
                 GpioEvents::P2HalFalling => {
                     cx.local.drive_pattern.clear_b();
                 }
                 GpioEvents::P3HalRising => {
                     cx.local.drive_pattern.set_c();
-                    cx.local
-                        .prev
-                        .2
-                        .replace(now.clone())
-                        .map(|el| dt = Some(now - el));
+                    dt = cx.local.prev.2.replace(now).map(|el| Some(now - el));
                 }
                 GpioEvents::P3HalFalling => {
                     cx.local.drive_pattern.clear_c();
@@ -296,8 +276,8 @@ mod etc {
             .lock(|pattern| *pattern = cx.local.drive_pattern.get());
 
         // Provide all of the needed measurements.
-        if let Some(dt) = dt {
-            let pt = cx.local.prev_vel_t.replace(now.clone());
+        if let Some(Some(dt)) = dt {
+            let pt = cx.local.prev_vel_t.replace(now);
             if pt.is_none() {
                 return;
             }
@@ -309,7 +289,7 @@ mod etc {
         }
     }
 
-    #[task(local = [phase1,phase2,phase3,pattern_receiver],shared = [duty,pattern],priority = 2)]
+    #[task(local = [phase1,phase2,phase3],shared = [duty,pattern],priority = 2)]
     /// Drives the phases of the motor.
     ///
     /// This is done by disabling the high/low side of each phase with respect
@@ -340,7 +320,7 @@ mod etc {
 
                 // Check if we got a new control signal.
                 let (pattern, shared_duty) =
-                    (&mut pattern, &mut shared_duty).lock(|w, duty| (w.clone(), duty.clone()));
+                    (&mut pattern, &mut shared_duty).lock(|w, duty| (*w, *duty));
 
                 // If we got a new control signal or if the motor shifted positions apply the
                 // control signals again in the new pattern.
@@ -556,8 +536,8 @@ mod etc {
 
         // Control system.
         let dt = pt as f32 / 1_000_000.;
-        let prev = cx.local.previous_avel.clone();
-        *cx.local.previous_avel = avel.clone();
+        let prev = *cx.local.previous_avel;
+        *cx.local.previous_avel = avel;
         let mut dvel = (avel - prev) / dt;
 
         // Remove undefined operations from the pid equations.
