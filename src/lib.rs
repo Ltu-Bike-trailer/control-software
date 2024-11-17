@@ -1,10 +1,8 @@
 //! Defines some panic behavior and common utilities for the application.
-#![allow(incomplete_features)]
-#![feature(generic_const_exprs)]
+
 #![no_main]
 #![no_std]
-#![feature(async_fn_traits)]
-#![feature(async_closure)]
+#![feature(async_fn_traits, generic_const_exprs, async_closure)]
 #![deny(
     warnings,
     missing_docs,
@@ -15,12 +13,16 @@
     rust_2018_idioms,
     rust_2024_compatibility
 )]
-#![allow(clippy::manual_range_contains, clippy::single_match_else, clippy::inline_always)]
+#![allow(
+    clippy::manual_range_contains,
+    clippy::single_match_else,
+    clippy::inline_always,
+    incomplete_features
+)]
 use core::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(feature = "esc")]
 pub mod bldc;
 pub mod cart;
-//pub mod svm;
 
 use defmt_rtt as _;
 use panic_probe as _;
