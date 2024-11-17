@@ -207,10 +207,6 @@ mod app {
                 GpioEvents::CAN => todo!("Handle CAN event"),
             }
         }
-        let _ = cx
-            .local
-            .pattern_sender
-            .try_send(cx.local.drive_pattern.get());
         defmt::info!("Edges {:?}", edges);
         // Trigger the phases inline since we want to run it as fast as
         // possible.
