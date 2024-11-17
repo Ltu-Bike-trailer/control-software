@@ -10,7 +10,6 @@ defmt = { version = "0.3", features = ["encoding-rzcobs"] }
 defmt-rtt = { version = "0.4" }
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 rtic = { version = "2.1.1", features = ["thumbv7-backend"] }
-
 nrf52840-hal = { git = "https://github.com/Ltu-Bike-trailer/nrf-hal.git", features = [
 #nrf52840-hal = { path = "../nrf-hal/nrf52840-hal", features = [
     "rt",
