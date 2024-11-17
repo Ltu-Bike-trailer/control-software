@@ -38,16 +38,6 @@ extern "C" fn _defmt_panic() -> ! {
     cortex_m::asm::udf()
 }
 
-/*
-#[panic_handler]
-#[allow(elided_lifetimes_in_paths)]
-#[unsafe(no_mangle)]
-#[inline(never)]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {}
-}
-    */
-
 static COUNT: AtomicUsize = AtomicUsize::new(0);
 defmt::timestamp!("{=usize}", {
     // NOTE(no-CAS) `timestamps` runs with interrupts disabled
@@ -63,33 +53,6 @@ pub fn exit() -> ! {
     }
 }
 
-#[derive(Clone)]
-/// A simple iterator of fixed size.
-pub struct OwnedItterator<Item: Sized + Clone, const SIZE: usize> {
-    buff: [Item; SIZE],
-    ptr: usize,
-}
-
-#[allow(dead_code)]
-impl<Item: Sized + Clone, const SIZE: usize> OwnedItterator<Item, SIZE> {
-    const fn new(buff: [Item; SIZE]) -> Self {
-        Self { buff, ptr: 0 }
-    }
-}
-
-impl<Item: Sized + Clone, const SIZE: usize> Iterator for OwnedItterator<Item, SIZE> {
-    type Item = Item;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.ptr >= SIZE {
-            return None;
-        }
-        let item = self.buff[self.ptr].clone();
-        self.ptr += 1;
-        Some(item)
-    }
-}
-
 /// Provides a simple rung buffer. This is used to set reference signals while
 /// testing the cart.
 pub struct RingBuffer<T: Sized + Clone + Copy, const N: usize> {
@@ -99,9 +62,9 @@ pub struct RingBuffer<T: Sized + Clone + Copy, const N: usize> {
 
 impl<T: Sized + Clone + Copy, const N: usize> RingBuffer<T, N> {
     /// Creates a new ring buffer using the `buffer` provided.
-    /// 
+    ///
     /// ## Panics
-    /// 
+    ///
     /// This function panics if the buffer is empty.
     #[must_use]
     #[inline(always)]
@@ -117,6 +80,7 @@ impl<T: Sized + Clone + Copy, const N: usize> RingBuffer<T, N> {
 impl<T: Sized + Clone + Copy, const N: usize> Iterator for RingBuffer<T, N> {
     type Item = T;
 
+    #[allow(clippy::single_match_else)]
     fn next(&mut self) -> Option<Self::Item> {
         match self.data.get(self.ptr) {
             Some(value) => {
