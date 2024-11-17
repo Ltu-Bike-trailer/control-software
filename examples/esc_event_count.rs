@@ -66,8 +66,7 @@ mod app {
     #[init]
     fn init(cx: init::Context) -> (Shared, Local) {
         defmt::info!("init");
-        nrf52840_hal::Clocks::new(cx.device.CLOCK)
-            .start_lfclk();
+        nrf52840_hal::Clocks::new(cx.device.CLOCK).start_lfclk();
         Mono::start(cx.device.RTC0);
 
         let p0 = nrf52840_hal::gpio::p0::Parts::new(cx.device.P0);
