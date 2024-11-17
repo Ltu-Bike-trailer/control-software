@@ -26,6 +26,7 @@ pub mod constants {
 
     /// Motor sample time in the [`MOTOR_TIMESCALE`] time-frame.
     pub const MOTOR_TS: u32 = 1_000;
+
     /// Motor time resolution
     pub const MOTOR_TIMESCALE: i32 = 1_000_000;
 

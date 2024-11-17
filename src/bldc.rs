@@ -186,7 +186,7 @@ impl Pattern {
     #[must_use]
     #[inline(always)]
     pub fn get_pattern_u8(&self) -> u8 {
-        unsafe { *self.ccw_pattern.get_unchecked(self.idx) }
+        unsafe { *CCW_PATTERN.get_unchecked(self.idx) }
     }
 
     #[allow(clippy::cast_possible_truncation)]
@@ -196,7 +196,8 @@ impl Pattern {
     }
 }
 
-/// A simple named tuple that allows the user to change directions.
+/// A simple named tuple that allows the user to remuneratively break
+/// if the duty cycle is less than 0.
 #[derive(Clone, Copy)]
 #[allow(dead_code)]
 pub struct Pattern(u8, u8);
@@ -204,6 +205,12 @@ pub struct Pattern(u8, u8);
 impl Default for Pattern {
     fn default() -> Self {
         Self(0, 0)
+    }
+}
+
+impl PartialEq for Pattern {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
     }
 }
 
@@ -215,12 +222,13 @@ impl Pattern {
         if duty >= 0. {
             return Self::conv(self.0);
         }
-        //Self::conv(self.1)
-        // This should provide breaking.
+        // Drive the low side mosfets if we want to break.
         ((false, true), (false, true), (false, true))
     }
 
     #[must_use]
+    /// Converts the pattern in to a set of bools to simplify the switching
+    /// logic.
     const fn conv(pattern: u8) -> ((bool, bool), (bool, bool), (bool, bool)) {
         (
             (pattern & 0b100000 != 0, pattern & 0b10000 != 0),

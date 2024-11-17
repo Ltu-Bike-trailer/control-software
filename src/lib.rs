@@ -40,16 +40,6 @@ extern "C" fn _defmt_panic() -> ! {
     cortex_m::asm::udf()
 }
 
-/*
-#[panic_handler]
-#[allow(elided_lifetimes_in_paths)]
-#[unsafe(no_mangle)]
-#[inline(never)]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {}
-}
-    */
-
 static COUNT: AtomicUsize = AtomicUsize::new(0);
 defmt::timestamp!("{=usize}", {
     // NOTE(no-CAS) `timestamps` runs with interrupts disabled
@@ -116,9 +106,9 @@ pub struct RingBuffer<T: Sized + Clone + Copy, const N: usize> {
 
 impl<T: Sized + Clone + Copy, const N: usize> RingBuffer<T, N> {
     /// Creates a new ring buffer using the `buffer` provided.
-    /// 
+    ///
     /// ## Panics
-    /// 
+    ///
     /// This function panics if the buffer is empty.
     #[must_use]
     #[inline(always)]
@@ -134,6 +124,7 @@ impl<T: Sized + Clone + Copy, const N: usize> RingBuffer<T, N> {
 impl<T: Sized + Clone + Copy, const N: usize> Iterator for RingBuffer<T, N> {
     type Item = T;
 
+    #[allow(clippy::single_match_else)]
     fn next(&mut self) -> Option<Self::Item> {
         match self.data.get(self.ptr) {
             Some(value) => {
