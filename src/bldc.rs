@@ -108,7 +108,6 @@ impl DrivePattern {
     }
 
     #[inline(always)]
-    #[must_use]
     /// Forces the motor to advance to the next step in commutation.
     pub fn previous(&mut self) {
         self.idx = match self.idx {
@@ -126,7 +125,7 @@ impl DrivePattern {
     /// Returns the current switching pattern.
     #[must_use]
     #[inline(always)]
-    pub fn get(&self) -> Pattern {
+    pub const fn get(&self) -> Pattern {
         //debug_assert!(self.idx <= 0b110);
         Pattern(CW_PATTERN[self.idx], CCW_PATTERN[self.idx])
     }
@@ -139,23 +138,19 @@ impl DrivePattern {
     }
 
     #[allow(clippy::cast_possible_truncation)]
+    #[must_use]
+    #[inline(always)]
     /// Returns the current state.
-    pub fn get_state(&self) -> u8 {
+    pub const fn get_state(&self) -> u8 {
         self.idx as u8
     }
 }
 
 /// A simple named tuple that allows the user to remuneratively break
 /// if the duty cycle is less than 0.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 #[allow(dead_code)]
 pub struct Pattern(u8, u8);
-
-impl Default for Pattern {
-    fn default() -> Self {
-        Self(0, 0)
-    }
-}
 
 impl PartialEq for Pattern {
     fn eq(&self, other: &Self) -> bool {
@@ -180,7 +175,7 @@ impl Pattern {
     /// logic.
     const fn conv(pattern: u8) -> ((bool, bool), (bool, bool), (bool, bool)) {
         (
-            (pattern & 0b100000 != 0, pattern & 0b10000 != 0),
+            (pattern & 0b10_0000 != 0, pattern & 0b1_0000 != 0),
             (pattern & 0b1000 != 0, pattern & 0b100 != 0),
             (pattern & 0b10 != 0, pattern & 0b1 != 0),
         )
