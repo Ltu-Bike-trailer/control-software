@@ -22,6 +22,7 @@ mod app {
 
     use controller::drivers::MA732::{Driver, Register};
     use cortex_m::asm;
+    use embedded_hal::delay::DelayNs;
     use nrf52840_hal::{
         gpio::{p0::Parts, Floating, Input, Level, Output, Pin, PushPull},
         pac::SPI1,
@@ -34,14 +35,13 @@ mod app {
     // Shared resources go here
     #[shared]
     struct Shared {
-        // TODO: Add resources
+
     }
 
     // Local resources go here
     #[local]
     struct Local {
         spim: Spi<SPI1>,
-
         driver: Driver<Pin<Output<PushPull>>>,
     }
 
@@ -82,15 +82,13 @@ mod app {
 
         worker::spawn().unwrap();
 
-        //blast::spawn().ok().unwrap();
-
         (
             Shared {
-                // Initialization of shared resources go here
+
             },
             Local {
                 spim,
-                driver, //cs
+                driver,
             },
         )
     }
@@ -116,15 +114,12 @@ mod app {
                 .await
         );
         defmt::info!("Angle post setting {:?}", driver.read_angle(&mut spim));
-    }
 
-    // Optional idle, can be removed if not needed.
-    #[idle]
-    fn idle(_cx: idle::Context) -> ! {
-        defmt::info!("idle");
 
-        loop {
-            asm::wfi();
+        loop{
+            defmt::info!("Angle {:?}", driver.read_angle(&mut spim));
+            Mono::delay_ms(&mut Mono,500);
         }
     }
+
 }

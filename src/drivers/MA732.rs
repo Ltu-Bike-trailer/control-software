@@ -5,7 +5,7 @@ use embedded_hal::{digital::OutputPin, spi::SpiBus};
 use rtic_monotonics::{fugit::ExtU64, Monotonic};
 
 ///Struct containing the needed pins to drive MA732 sensor.
-pub struct Driver</* SPI: SpiBus, */ PIN: OutputPin> {
+pub struct Driver<PIN: OutputPin> {
     /// Spi configured with MISO, MOSI and clk pins.
     // pub spi: SPI,
     /// Chip-Select Pin, for driving the pin from high to low
@@ -68,7 +68,9 @@ impl<PIN: OutputPin> Driver<PIN> {
     /// Reads the angle from the MA732 sensor.
     ///
     /// returns the angle in radians.
+    ///
     /// ### note
+    ///
     /// Caution there needs to be at least 150ns between polls of this.
     pub fn read_angle<SPI: SpiBus>(&mut self, spi: &mut SPI) -> f32 {
         let mut angle: [u8; 2] = [0; 2];
@@ -193,12 +195,14 @@ impl<PIN: OutputPin> Driver<PIN> {
         .await;
     }
 }
+
 #[allow(clippy::cast_sign_loss)]
 #[allow(clippy::cast_possible_truncation)]
 const fn radians_to_u16(radians: f32) -> u16 {
     let radians = radians % f32::consts::TAU;
     ((radians / f32::consts::TAU) * u16::MAX as f32) as u16
 }
+
 #[allow(clippy::cast_possible_truncation)]
 const fn u16_to_radians(angle: u16) -> f32 {
     angle as f32 / u16::MAX as f32 * f32::consts::TAU
