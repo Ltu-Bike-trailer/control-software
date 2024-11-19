@@ -4,6 +4,7 @@
 runner = "probe-rs run --chip nrf52840_xxAA"
 #runner = "arm-none-eabi-gdb -q -x openocd.gdb"
 #runner = "cargo flash --chip nrf52840_xxAA"
+#runner = "espflash flash --monitor "
 rustflags = [
     "-C",
     "link-arg=--nmagic",
@@ -14,7 +15,7 @@ rustflags = [
 
 [build]
 #TODO replace this with stm32...
-target = "thumbv7em-none-eabihf" # Cortex-M4F and Cortex-M7F (with FPU)
+target = "thumbv7em-none-eabi" # Cortex-M4F and Cortex-M7F (with FPU)
 
 [alias]
 rb = "run --bin"

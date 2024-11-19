@@ -20,6 +20,7 @@ mod app {
         drivers::can::{
             AcceptanceFilterMask,
             Bitrate,
+            InterruptFlagCode,
             Mcp2515Driver,
             Mcp2515Settings,
             McpClock,
@@ -138,7 +139,7 @@ mod app {
 
         let mut sender = Sender::new();
         sender.set_left_motor(1.0).unwrap();
-        
+
         let mut msg = sender.dequeue().unwrap();
         msg.print_frame();
         can_driver.transmit(&msg);
@@ -149,7 +150,7 @@ mod app {
 
         //can_driver.loopback_test(frame);
         //can_driver.transmit(&frame);
-        
+
         (Shared { gpiote }, Local {
             candriver: can_driver,
             sender,
@@ -172,13 +173,14 @@ mod app {
                 defmt::println!("\n");
                 defmt::info!("GPIOTE interrupt occurred [channel 0] - Can Master!");
                 let interrupt_type = cx.local.candriver.interrupt_decode().unwrap();
-                cx.local.candriver.handle_interrupt(interrupt_type);
+
+                if let Some(frame) = cx.local.candriver.handle_interrupt(interrupt_type) {
+                    // Consume frame here if you need to...
+                }
 
                 if (cx.local.candriver.interrupt_is_cleared()) {
                     defmt::info!("All CAN interrupt has been handled!");
                     gpiote.channel0().reset_events();
-                    //gpiote.reset_events(); //Execute when all Events are
-                    // handled.
                 }
                 defmt::println!("\n");
             }
