@@ -5,7 +5,7 @@ This repo contains fixes and additional features for the can driver v2. This bra
 
 ## TODOS:
 - Test the custom PCB and the MCP2515 module for CAN communication between two MCUs. 
-- Add wake up from sleep mode feature, for minimal power consumtion.
+- Add wake up from sleep mode feature, for minimal power consumption.
 - Fix the filter and listen on certain ID logic, cleaning up current.
 
 ### Findings and feedback for the `Sensor Controller Board V1.0`

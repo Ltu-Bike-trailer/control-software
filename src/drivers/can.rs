@@ -3,7 +3,7 @@
 //! ## Note
 //!
 //! This driver is an updated version of the first driver.
-//! The driver is still under progress and might change slighlty over time.
+//! The driver is still under progress and might change slightly over time.
 #![no_main]
 #![no_std]
 #![allow(unused)]
