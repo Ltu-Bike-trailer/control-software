@@ -1,6 +1,16 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{bracketed, parse::Parse, parse_macro_input, Data, DeriveInput, Ident, LitStr, Token};
+use syn::{
+    bracketed,
+    parse::Parse,
+    parse_macro_input,
+    Data,
+    DeriveInput,
+    Ident,
+    LitInt,
+    LitStr,
+    Token,
+};
 
 fn _hash(data: &str) -> u32 {
     let mut prev_sum: u32 = 0;

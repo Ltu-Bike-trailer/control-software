@@ -20,7 +20,6 @@ mod app {
     use core::arch::asm;
 
     use embedded_hal::digital::OutputPin;
-    use esc::PinConfig;
     use nrf52840_hal::gpio;
 
     // Shared resources go here
