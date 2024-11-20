@@ -170,6 +170,14 @@ impl Pattern {
         ((false, true), (false, true), (false, true))
     }
 
+    /// Returns a u8 representation of the pattern.
+    pub fn get_u8(self, duty: f32) -> u8 {
+        if duty >= 0. {
+            return self.0;
+        }
+        0b010101
+    }
+
     #[must_use]
     /// Converts the pattern in to a set of bools to simplify the switching
     /// logic.
