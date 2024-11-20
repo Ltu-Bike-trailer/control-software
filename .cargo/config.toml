@@ -1,22 +1,25 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
-#TODO: Replace this with propper target.
 
-runner = "probe-rs run --chip nrf52840_xxAA"
+#runner = "probe-rs run --chip nrf52840_xxAA"
 #runner = "arm-none-eabi-gdb -q -x openocd.gdb"
 #runner = "cargo flash --chip nrf52840_xxAA"
-#runner = "espflash flash --monitor "
+runner = "espflash flash --monitor "
 rustflags = [
     "-C",
     "link-arg=--nmagic",
     "-C", "link-arg=-Tdefmt.x",
      "-C", "link-arg=-Tlink.x",
-
 ]
 
 [build]
 #TODO replace this with stm32...
 target = "thumbv7em-none-eabi" # Cortex-M4F and Cortex-M7F (with FPU)
-
+#target = "riscv32imc-esp-espidf"
+#
+# [target.riscv32imc-esp-espidf]
+# linker = "ldproxy"
+# rustflags = ["--cfg", "espidf_time64"]
+#
 [alias]
 rb = "run --bin"
 rrb = "run --release --bin"
@@ -26,3 +29,13 @@ bbr = "build --release --bin"
 [env]
 DEFMT_LOG = "info"
 # DEFMT_LOG = "trace"
+
+#
+# MCU="esp32c3"
+# # Note: this variable is not used by the pio builder (`cargo build --features pio`)
+# ESP_IDF_VERSION = "v5.2.2"
+#
+# # Workaround for https://github.com/esp-rs/esp-idf-template/issues/174 
+# CRATE_CC_NO_DEFAULTS = "1"
+
+

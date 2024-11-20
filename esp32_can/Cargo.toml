@@ -1,0 +1,46 @@
+[package]
+name = "esp32_can"
+version = "0.1.0"
+authors = ["wiiggee1 <viktor@smedberg.eu>"]
+edition = "2021"
+resolver = "2"
+rust-version = "1.77"
+
+[[bin]]
+name = "esp32_can"
+harness = false # do not use the built in cargo test harness -> resolve rust-analyzer errors
+
+[lib]
+name = "esp32_can"  # Optional, defaults to the package name
+crate-type = ["lib"]  # Specify the type of library (e.g., static or shared)
+path = "src/lib.rs"   # Default location, change if needed
+harness = false # do not use the built in cargo test harness -> resolve rust-analyzer errors
+
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true    # Symbols are nice and they don't increase the size on Flash
+opt-level = "z"
+
+[features]
+default = []
+
+experimental = ["esp-idf-svc/experimental"]
+
+[dependencies]
+log = "0.4"
+esp-idf-svc = { version = "0.49", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }
+esp-idf-sys = "0.35.0"
+embedded-can = "0.4.1"
+embedded-hal = "1.0.0"
+embedded-io = "0.6.1"
+embedded-hal-nb = "1.0.0"
+anyhow = "1.0.93"
+esp-println = "0.12.0"
+
+
+[build-dependencies]
+embuild = "0.32.0"
+cc = "=1.1.30" # Necessary until a new version of `esp-idf-sys` is released
