@@ -111,7 +111,8 @@ impl CanMessage {
         let id = self.id_raw() >> 5;
         let dlc = self.dlc;
         let data = self.data();
-        defmt::info!("Id({:x}), DLC({:x}), Data({:08b})", id, dlc, data);
+        //defmt::info!("{=[u8]}", bytes);
+        defmt::info!("Id({:x}), DLC({:x}), Data({:?})", id, dlc, data);
     }
 
     /// Maps a CAN message to a byte sequence.

@@ -4,8 +4,8 @@
 //!
 //! This driver is an updated version of the first driver.
 //! The driver is still under progress and might change slightly over time.
-#![no_main]
-#![no_std]
+//#![no_main]
+//#![no_std]
 #![allow(unused)]
 #![allow(missing_docs)]
 
@@ -644,6 +644,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin> Can
     /// This method is required for the `embedded_can::blocking::Can` trait.  
     fn transmit(&mut self, frame: &Self::Frame) -> Result<(), Self::Error> {
         //self.read_status();
+        log::info!("Attempting to transmit on CAN bus!");
         self.transmit_can(frame); // This is the custom driver logic for transmitting on the CAN bus.
         Ok(())
     }
@@ -986,8 +987,8 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
 
         if (is_pending) {
             self.write_register(MCP2515Register::TXB0CTRL, bit_mask);
-            //self.write_register(MCP2515Register::TXB1CTRL, reg_bits);
-            //self.write_register(MCP2515Register::TXB2CTRL, reg_bits);
+            self.write_register(MCP2515Register::TXB1CTRL, bit_mask);
+            self.write_register(MCP2515Register::TXB2CTRL, bit_mask);
         } else {
             self.write_register(MCP2515Register::TXB0CTRL, CLEAR);
             self.write_register(MCP2515Register::TXB1CTRL, CLEAR);
@@ -1078,12 +1079,12 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
         /* The requested mode must be verified by reading the OPMOD[2:0] bits
          * (CANSTAT[7:5]) */
         let canstat_new = self.read_register(MCP2515Register::CANSTAT, 0x00).unwrap();
-        log::trace!("CANSTAT after reset instruction is: {:08b}", canstat_reg);
-        log::trace!("CANCTRL mask prior writing: {:08b}", canctrl_byte);
-        log::trace!("CANCTRL after setup is: {:08b}", canctrl_bits);
-        log::trace!("CANSTAT after setup is: {:08b}", canstat_new);
-        log::trace!("TXRTSCTRL after setup is: {:08b}", txrtscttrl_reg);
-        log::trace!("BFPCTRL after setup is: {:08b}", bfpctrl_reg);
+        log::info!("CANSTAT after reset instruction is: {:08b}", canstat_reg);
+        log::info!("CANCTRL mask prior writing: {:08b}", canctrl_byte);
+        log::info!("CANCTRL after setup is: {:08b}", canctrl_bits);
+        log::info!("CANSTAT after setup is: {:08b}", canstat_new);
+        log::info!("TXRTSCTRL after setup is: {:08b}", txrtscttrl_reg);
+        log::info!("BFPCTRL after setup is: {:08b}", bfpctrl_reg);
 
         self
     }
@@ -1127,6 +1128,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
     /// Based on CANINTF, RXNCTRL.FILT bits, or through RX status instruction.
     fn receive_can(&mut self) -> CanMessage {
         let rx = unsafe { self.active_rx.0.unwrap_unchecked() };
+        
         let rx_buffer = self.read_rx_buffer(rx).unwrap();
         let mut frame = CanMessage::try_from(rx_buffer).unwrap();
         log::info!("Can bus received the Frame:");
@@ -1322,6 +1324,8 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
         log::info!("CANSTAT register bits: {:08b}", canstat);
         log::info!("EFLG register bits: {:08b}", errorflag_reg);
         log::info!("EFLG: {:?} to handle!", eflags_to_handle);
+        
+
     }
 
     /// Decodes the EFLG register...
@@ -1377,7 +1381,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
         let canintf = self.read_register(MCP2515Register::CANINTF, 0x00).unwrap();
         self.message_error_check(canintf);
 
-        log::trace!("CANINTF register bits: {:08b}", canintf);
+        //log::info!("CANINTF register bits: {:08b}", canintf);
 
         match received_interrupt {
             InterruptFlagCode::NoInterrupt => None,
@@ -1388,11 +1392,11 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
                 None
             }
             InterruptFlagCode::WakeUpInterrupt => {
-                log::trace!("Wakeup interrupt occurred!");
+                log::info!("Wakeup interrupt occurred!");
                 None
             }
             InterruptFlagCode::TXB0Interrupt => {
-                log::trace!("TXB0 successfully transmitted a message!");
+                log::info!("TXB0 successfully transmitted a message!");
                 self.busy_tx[TXBN::TXB0.idx()] = false;
 
                 self.clear_interrupt_flag(2);
@@ -1401,13 +1405,15 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
                 None
             }
             InterruptFlagCode::TXB1Interrupt => {
-                log::trace!("TXB1 successfully transmitted a message!");
+                log::info!("TXB1 successfully transmitted a message!");
                 self.busy_tx[TXBN::TXB1.idx()] = false;
+                self.clear_interrupt_flag(3);
                 None
             }
             InterruptFlagCode::TXB2Interrupt => {
-                log::trace!("TXB2 successfully transmitted a message!");
+                log::info!("TXB2 successfully transmitted a message!");
                 self.busy_tx[TXBN::TXB2.idx()] = false;
+                self.clear_interrupt_flag(4);
                 None
             }
             InterruptFlagCode::RXB0Interrupt => {

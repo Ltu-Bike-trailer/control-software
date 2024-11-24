@@ -13,7 +13,11 @@ rtic = { version = "2.1.1", features = ["thumbv7-backend"] }
 nrf52840-hal = { git = "https://github.com/nrf-rs/nrf-hal/", features = [
     "rt",
 ], default-features = false }
-rtic-monotonics = { version = "1.0.0", features = [
+#rtic-monotonics = { version = "1.0.0", features = [
+#    "cortex-m-systick",
+#    "nrf52840",
+#] }
+rtic-monotonics = { version = "2.0.2", features = [
     "cortex-m-systick",
     "nrf52840",
 ] }

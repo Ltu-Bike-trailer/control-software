@@ -17,7 +17,7 @@ mod app {
 
     use controller::{
         boards::*,
-        drivers::can::{
+        drivers::{can::{
             AcceptanceFilterMask,
             Bitrate,
             Mcp2515Driver,
@@ -28,7 +28,7 @@ mod app {
             SettingsCanCtrl,
             CLKPRE,
             RXBN,
-        },
+        }, message::CanMessage},
     };
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};
@@ -128,15 +128,15 @@ mod app {
             .hi_to_lo()
             .enable_interrupt();
 
-        let dummy_id = StandardId::new(0x2).unwrap();
+        let dummy_id = StandardId::new(0x0).unwrap();
         //defmt::info!("dummy_data: {:?}", dummy_data.len());
 
         let mut sender = Sender::new();
         sender.set_left_motor(1.0).unwrap();
-
+        
         let mut msg = sender.dequeue().unwrap();
         msg.print_frame();
-        //can_driver.transmit(&msg);
+        can_driver.transmit(&msg);
         defmt::info!("Waiting for Can Frame retrieval from Master Node...");
 
         (Shared { gpiote }, Local {
@@ -159,20 +159,28 @@ mod app {
         let handle = cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
                 defmt::println!("\n");
-                defmt::info!("GPIOTE interrupt occurred - Custom PCB Node [channel 0]");
+                defmt::info!("GPIOTE interrupt occurred [channel 0] - Can Master!");
                 let interrupt_type = cx.local.candriver.interrupt_decode().unwrap();
-                cx.local.candriver.handle_interrupt(interrupt_type);
+
+                if let Some(frame) = cx.local.candriver.handle_interrupt(interrupt_type) {
+                    // Consume frame here if you need to...
+                    cx.local.candriver.transmit(&frame);
+                }
 
                 if (cx.local.candriver.interrupt_is_cleared()) {
                     defmt::info!("All CAN interrupt has been handled!");
                     gpiote.channel0().reset_events();
-                    //gpiote.reset_events(); //Execute when all Events are
-                    // handled.
                 }
                 defmt::println!("\n");
             }
-
+            if (gpiote.channel1().is_event_triggered()) {
+                defmt::println!("\n");
+                defmt::info!("GPIOTE interrupt occurred [channel 1] - Can Node!");
+                defmt::println!("\n");
+            }
+           
             //gpiote.reset_events();
         });
+        
     }
 }

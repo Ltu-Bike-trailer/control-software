@@ -1,61 +1,70 @@
-#![no_main]
-
 use esp32_can as _;
 use esp32_can::drivers::{
     can::{Mcp2515Driver, Mcp2515Settings,AcceptanceFilterMask, Bitrate, McpClock, OperationTypes, ReceiveBufferMode, SettingsCanCtrl, CLKPRE},
     message::CanMessage};
 
-use embedded_hal::digital::{OutputPin, *};
-use esp_println::*;
+use embedded_hal::digital::{InputPin, OutputPin, *};
+use embedded_can::{blocking::Can, StandardId};
 
+use esp_idf_hal::delay::FreeRtos;
+use esp_idf_hal::gpio::InterruptType;
 use esp_idf_svc::hal::{
-    gpio::{InputPin, Level, Pin, PinDriver, Pins, Pull}, 
+    gpio::{Level, PinDriver, Pull}, 
     peripherals::Peripherals, 
-    spi::*,
+    spi::{config::DriverConfig, config::Config, Dma, SpiDriver, SpiBusDriver, config::MODE_0},
     prelude::*};
 
-use log::{info, debug, warn};
+use log::{info, debug, warn, error};
 
-fn main() -> anyhow::Result<()>{
+fn main() -> anyhow::Result<(), anyhow::Error>{
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
     esp_idf_svc::sys::link_patches();
 
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
-    
+   
     let periph = Peripherals::take()?;
+
+    log::info!("Assigning GPIO peripheral pins now!");
     let spi = periph.spi2;
 
     // PIN mapping for interfacing with the SpiDriver and SpiBusDriver
     let sck = periph.pins.gpio6;
-    let sdo = periph.pins.gpio7;
-    let sdi = periph.pins.gpio2; 
+    let sdo = periph.pins.gpio7; // SDO = MOSI
+    let sdi = periph.pins.gpio2; // SDI = MISO
     
-    let mut cs_pin = PinDriver::output(periph.pins.gpio18)?;
-    cs_pin.set_state(PinState::High)?;
+    log::info!("Trying to initialize PinDriver for cs and interrupt pin for CAN driver!");
     
-    let mut can_interrupt = PinDriver::input(periph.pins.gpio17)?;
+    let mut cs_pin = PinDriver::output(periph.pins.gpio10)?;
+    cs_pin.set_level(Level::High)?;
+    //cs_pin.set_state(PinState::High)?;
+    
+    
+    let mut can_interrupt = PinDriver::input(periph.pins.gpio1)?;
     can_interrupt.set_pull(Pull::Up)?;
+    can_interrupt.set_interrupt_type(InterruptType::NegEdge)?;
+    
+    //can_interrupt.enable_interrupt()?;
     // -----------------------------------------------------------------
-
-    let spi_driver = SpiDriver::new::<SPI2>(
+    
+    log::info!("Trying to initialize SpiDriver!");
+    
+    let spi_driver = SpiDriver::new(
         spi, 
         sck, 
         sdo, 
         Some(sdi), 
-        &SpiDriverConfig::new())?;
+        &DriverConfig::default())?;
  
-    const K125: Hertz = Hertz(125000);
-
-    let bus_config = config::Config::new()
-        .baudrate(K125)
-        .data_mode(config::MODE_0);
+    //const K125: KiloHertz = 125.kHz();
+    let bus_config = Config::new()
+        //.baudrate(500u32.kHz().into())
+        .baudrate(3200u32.kHz().into())
+        .data_mode(MODE_0);
     
-    
+    log::info!("Trying to initialize SpiBusDriver!");
     let spi_bus = SpiBusDriver::new(spi_driver, &bus_config)?;
-   
-    
 
     const CLKEN: bool = true;
     const OSM: bool = false;
@@ -85,8 +94,50 @@ fn main() -> anyhow::Result<()>{
     );
 
     log::info!("Initializing MCP2515 Driver!");
-    esp_println::println!("Initializing MCP2515 Driver!");
     let mut can_driver = Mcp2515Driver::init(spi_bus, cs_pin, can_interrupt, can_settings);
+    log::info!("MCP2515 Driver was successfully created!");
 
-    Ok(())
+
+    //Ok(())
+    
+    let dummy_id = StandardId::new(0x0).unwrap();
+    let mut frame = CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02,
+        0x03]).unwrap();
+    frame.print_frame();
+    //let _ = can_driver.transmit(&frame);
+
+    loop {
+        if can_driver.interrupt_pin.is_low(){
+            log::info!("Interrupt pin is low!");
+        }else {
+            let is_high: bool = can_driver.interrupt_pin.is_high();
+            log::info!("Interrupt pin is high = {:?}", is_high);
+        }
+        //FreeRtos::delay_ms(500);
+        //if can_driver.interrupt_pin.is_low(){
+           let interrupt_type = can_driver.interrupt_decode().unwrap();
+           if let Some(frame) = can_driver.handle_interrupt(interrupt_type) {
+               // Consume frame here:
+               let mut frme = frame;
+               frme.print_frame();
+               //let _ = can_driver.transmit(&frme);
+           }
+           if can_driver.interrupt_is_cleared(){
+               log::info!("All interrupt is cleared!");
+           }else{
+                let interrupt_type = can_driver.interrupt_decode().unwrap();
+                can_driver.handle_interrupt(interrupt_type);
+           }
+           //can_driver.interrupt_pin.enable_interrupt()?;
+
+        //}else{
+            //FreeRtos::delay_ms(500);
+            
+        //}
+            FreeRtos::delay_ms(100);
+    
+    }
+
+
 }
+

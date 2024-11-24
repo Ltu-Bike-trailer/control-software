@@ -1,4 +1,4 @@
 [toolchain]
-#channel = "nightly"
-channel = "esp"
+channel = "nightly"
+#channel = "esp"
 components = ["rust-src"]

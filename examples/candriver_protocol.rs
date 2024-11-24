@@ -11,13 +11,15 @@ use nrf52840_hal as _;
 use nrf52840_hal::gpio::{Level, Port};
 use panic_probe as _;
 use rtic::app;
+use rtic_monotonics::nrf::rtc::prelude::*;
+nrf_rtc0_monotonic!(Mono);
 
-#[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC0])]
+#[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC1, TIMER0, TIMER1])]
 mod app {
 
     use controller::{
         boards::*,
-        drivers::can::{
+        drivers::{can::{
             AcceptanceFilterMask,
             Bitrate,
             InterruptFlagCode,
@@ -29,12 +31,12 @@ mod app {
             SettingsCanCtrl,
             CLKPRE,
             RXBN,
-        },
+        }, message::CanMessage},
     };
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};
-    use embedded_hal::{digital::OutputPin, spi::SpiBus};
-    use lib::protocol::sender::Sender;
+    use embedded_hal::{delay::DelayNs, digital::OutputPin, spi::SpiBus};
+    use lib::{protocol::{constants::*, sender::Sender}};
     use nrf52840_hal::{
         gpio::{self, Floating, Input, Level, Output, Pin, Port, PullUp, PushPull},
         gpiote::{Gpiote, GpioteInputPin},
@@ -44,21 +46,22 @@ mod app {
         spim::*,
         Clocks,
     };
-    use rtic_monotonics::nrf::{
-        self,
-        rtc::*,
-        timer::{fugit::ExtU64, Timer0 as Mono},
-    };
+
+    use rtic_monotonics::{fugit::{ExtU64, ExtU32}, Monotonic};
+
+    use crate::Mono;
 
     #[shared]
     struct Shared {
         gpiote: Gpiote,
+        sender: Sender<10>,
+        candriver: Mcp2515Driver<Spi<SPI0>, Pin<Output<PushPull>>, Pin<Input<PullUp>>>,
+        
     }
 
     #[local]
     struct Local {
-        candriver: Mcp2515Driver<Spi<SPI0>, Pin<Output<PushPull>>, Pin<Input<PullUp>>>,
-        sender: Sender<10>,
+        //candriver: Mcp2515Driver<Spi<SPI0>, Pin<Output<PushPull>>, Pin<Input<PullUp>>>,
     }
 
     #[init]
@@ -68,8 +71,10 @@ mod app {
         let port0 = gpio::p0::Parts::new(device.P0);
         let port1 = gpio::p1::Parts::new(device.P1);
         let t = nrf52840_hal::pac::Peripherals::take();
+        
         let clk = Clocks::new(device.CLOCK).enable_ext_hfosc().start_lfclk();
-
+        Mono::start(device.RTC0);
+        
         /* Disable shared peripheral addresses */
 
         device.SPIM0.enable.write(|w| w.enable().disabled());
@@ -91,7 +96,7 @@ mod app {
         let cs_pin = port1.p1_02.into_push_pull_output(Level::High).degrade();
         let can_interrupt = port1.p1_15.into_pullup_input().degrade();
 
-        let mut spi = Spi::new(device.SPI0, pins, Frequency::K125, MODE_0);
+        let mut spi = Spi::new(device.SPI0, pins, Frequency::K500, MODE_0);
         let mut gpiote = Gpiote::new(device.GPIOTE);
 
         let dummy_data = "dummy".as_bytes();
@@ -138,22 +143,29 @@ mod app {
         defmt::info!("dummy_data: {:?}", dummy_data.len());
 
         let mut sender = Sender::new();
-        sender.set_left_motor(1.0).unwrap();
+        //sender.set_left_motor(1.0).unwrap();
+        
+        //sender.set_theta(value) 
+        //let mut msg = sender.dequeue().unwrap();
 
-        let mut msg = sender.dequeue().unwrap();
-        msg.print_frame();
-        can_driver.transmit(&msg);
+        //msg.data = dummy_data;
+        //msg.print_frame();
+        //can_driver.transmit(&msg);
+        
+
+        send_updates::spawn().unwrap();
+        fetch_data::spawn().unwrap();
+        
 
         //let mut frame =
         //   CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02,
         // 0x03]).unwrap();
 
         //can_driver.loopback_test(frame);
-        //can_driver.transmit(&frame);
+       // can_driver.transmit(&frame);
 
-        (Shared { gpiote }, Local {
-            candriver: can_driver,
-            sender,
+        (Shared { gpiote, sender, candriver: can_driver }, Local {
+            
         })
     }
 
@@ -163,25 +175,35 @@ mod app {
 
         loop {
             asm::wfi();
+            //fetch_data::spawn().unwrap();
         }
     }
 
-    #[task(binds = GPIOTE, shared = [gpiote], local = [candriver, sender])]
+    #[task(binds = GPIOTE, shared = [gpiote, sender, candriver], priority = 5)]
     fn can_interrupt(mut cx: can_interrupt::Context) {
         let handle = cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
                 defmt::println!("\n");
                 defmt::info!("GPIOTE interrupt occurred [channel 0] - Can Master!");
-                let interrupt_type = cx.local.candriver.interrupt_decode().unwrap();
+                
+                cx.shared.candriver.lock(|can_driver|{
+                    let interrupt_type = can_driver.interrupt_decode().unwrap();
+                    if let Some(frame) = can_driver.handle_interrupt(interrupt_type) {
+                        let mut msg_frame = frame;
+                        let std_id = StandardId::new(msg_frame.id_raw()).unwrap();
+                        let recieved_id = Message::try_from(std_id).unwrap();
 
-                if let Some(frame) = cx.local.candriver.handle_interrupt(interrupt_type) {
-                    // Consume frame here if you need to...
-                }
+                        defmt::info!("Received the frame message type: {:?}", recieved_id);
+                        //handle_can::spawn(frame).unwrap();
+                        //fetch_data::spawn().unwrap();
+                        //can_driver.transmit(&msg_frame);
+                    }
+                    if can_driver.interrupt_is_cleared() {
+                        defmt::info!("All CAN interrupt has been handled!");
+                        gpiote.channel0().reset_events();
+                    }
+                });
 
-                if (cx.local.candriver.interrupt_is_cleared()) {
-                    defmt::info!("All CAN interrupt has been handled!");
-                    gpiote.channel0().reset_events();
-                }
                 defmt::println!("\n");
             }
             if (gpiote.channel1().is_event_triggered()) {
@@ -192,5 +214,48 @@ mod app {
 
             //gpiote.reset_events();
         });
+    }
+
+    #[task(priority = 1, shared = [candriver, sender])]
+    async fn handle_can(mut cx: handle_can::Context, frame: lib::protocol::message::CanMessage){
+        let mut msg_frame = frame;
+        let std_id = StandardId::new(msg_frame.id_raw()).unwrap();
+        let recieved_id = Message::try_from(std_id).unwrap();
+
+        defmt::info!("Received the frame message type: {:?}", recieved_id);
+
+        // This is just for testing and keep sending dummy data.
+    }
+    #[task(priority = 4, shared = [sender])]
+    async fn fetch_data(mut cx: fetch_data::Context){
+        // This is just for testing and keep sending dummy data.
+        loop {
+            Mono::delay_ms(&mut Mono, 100);            
+            cx.shared.sender.lock(|sender|{
+                sender.set_theta(1.2_f32);
+                sender.set_theta(2.4_f32);
+            });
+            Mono::delay(500u32.millis().into()).await;            
+            
+        }
+    }
+    
+    #[task(priority = 3, shared = [sender, candriver])]
+    /// This should enqueue on the Shared `Sender` whenever a 
+    /// sensor reads a new value.
+    async fn send_updates(mut cx: send_updates::Context){
+        // Loop and dequeue, and transmit on the can bus.
+        loop {
+            cx.shared.sender.lock(|sender|{
+                if let Some(data) = sender.dequeue(){
+                    // Value was found in buffer [TRANSMIT OVER CAN]:
+                    cx.shared.candriver.lock(|can|{
+                        can.transmit(&data);
+                    });
+                } 
+            });
+            //Mono::delay(100u32.millis().into()).await;            
+
+        }
     }
 }

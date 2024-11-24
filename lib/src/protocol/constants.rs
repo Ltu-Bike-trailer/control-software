@@ -4,12 +4,14 @@
 
 use embedded_can::StandardId;
 use statics::Iter;
+use defmt::Format;
+
 
 /// Defines the message enumerations.
 ///
 /// Enumerates all of the message types.
 #[repr(u16)]
-#[derive(Clone, Iter, Debug)]
+#[derive(Clone, Iter, Debug, Format)]
 pub enum Message {
     /// Represents a write of the left motor state.
     LeftMotor = 0,

@@ -112,7 +112,7 @@ pub enum OperationTypes {
 }
 
 /// Start address for the Transmit buffer N.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Format)]
 #[repr(u8)]
 #[allow(clippy::upper_case_acronyms)]
 enum TXBN {
@@ -1125,7 +1125,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
     fn transmit_can(&mut self, can_msg: &CanMessage) {
         let mut can_frame = CanMessage::new(can_msg.id, &can_msg.data).unwrap();
         let txbn = self.get_available_tx();
-
+        defmt::trace!("Available tx: {:?}", txbn);
         self.load_tx_buffer(txbn, can_frame); // How should I handle buffer target for transmission
         self.request_to_send(txbn);
     }
@@ -1387,7 +1387,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
         let canintf = self.read_register(MCP2515Register::CANINTF, 0x00).unwrap();
         self.message_error_check(canintf);
 
-        defmt::println!("CANINTF register bits: {:08b}", canintf);
+        //defmt::println!("CANINTF register bits: {:08b}", canintf);
 
         match received_interrupt {
             InterruptFlagCode::NoInterrupt => None,
@@ -1413,17 +1413,20 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
             InterruptFlagCode::TXB1Interrupt => {
                 defmt::println!("TXB1 successfully transmitted a message!");
                 self.busy_tx[TXBN::TXB1.idx()] = false;
+                self.clear_interrupt_flag(3);
                 None
             }
             InterruptFlagCode::TXB2Interrupt => {
                 defmt::println!("TXB2 successfully transmitted a message!");
                 self.busy_tx[TXBN::TXB2.idx()] = false;
+                self.clear_interrupt_flag(4);
                 None
             }
             InterruptFlagCode::RXB0Interrupt => {
                 defmt::println!("RXB0 received a message!");
                 self.active_rx = (Some(RXBN::RXB0), true);
                 let mut frame = self.receive().unwrap();
+                frame.print_frame();
 
                 let high_prio_id = StandardId::new(0x0).unwrap();
                 let id_high_prio = Id::Standard(high_prio_id);
