@@ -133,7 +133,7 @@ mod app {
 
         let mut sender = Sender::new();
         sender.set_left_motor(1.0).unwrap();
-        
+
         let mut msg = sender.dequeue().unwrap();
         msg.print_frame();
         can_driver.transmit(&msg);

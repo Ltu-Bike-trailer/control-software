@@ -94,7 +94,7 @@ mod app {
             miso: Some(port0.p0_28.into_floating_input().degrade()),
         };
 
-        /// ESP PINS 
+        /// ESP PINS
         let pins_node = nrf52840_hal::spi::Pins {
             sck: Some(port0.p0_04.into_push_pull_output(Level::Low).degrade()),
             mosi: Some(port0.p0_11.into_push_pull_output(Level::Low).degrade()),
@@ -164,7 +164,7 @@ mod app {
 
         let mut sender = Sender::new();
         sender.set_left_motor(1.0).unwrap();
-        
+
         let mut msg = sender.dequeue().unwrap();
         msg.print_frame();
         can_driver.transmit(&msg);

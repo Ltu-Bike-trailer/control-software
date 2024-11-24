@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 #![allow(unused)]
-
+#![feature(generic_arg_infer)]
 use controller as _;
 use controller::drivers::{
     can::{Mcp2515Driver, Mcp2515Settings},
@@ -14,8 +14,10 @@ use nrf52840_hal as _;
 use nrf52840_hal::gpio::{Level, Port};
 use panic_probe as _;
 use rtic::app;
+use rtic_monotonics::nrf::rtc::prelude::*;
+nrf_rtc0_monotonic!(Mono);
 
-#[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC0])]
+#[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC1])]
 mod app {
 
     use controller::{
@@ -51,13 +53,11 @@ mod app {
         Clocks,
     };
     use rtic_monotonics::{
-        nrf::{
-            self,
-            rtc::*,
-            timer::{fugit::ExtU64, Timer0 as Mono},
-        },
+        fugit::{ExtU32, ExtU64},
         Monotonic,
     };
+
+    use crate::Mono;
 
     #[shared]
     struct Shared {
@@ -81,6 +81,8 @@ mod app {
         let systick = cx.core.SYST;
         let timer0 = device.TIMER0;
 
+        Mono::start(device.RTC0);
+
         //let pin_mapping = PinMapping::new(port0, port1);
         //let (pin_map, spi) =pin_mapping.can(device.SPIM1);
 
@@ -93,9 +95,6 @@ mod app {
         let mut gpiote = Gpiote::new(device.GPIOTE);
         let mut pwm = Pwm::new(device.PWM0);
         let mut hx711_instance = Hx711Driver::init(pd_sck, dout_pin, Gain::Apply128);
-
-        let interrupt_token = rtic_monotonics::create_nrf_timer0_monotonic_token!();
-        Mono::start(timer0, interrupt_token);
 
         gpiote
             .channel0()
@@ -123,11 +122,19 @@ mod app {
 
     #[task(local = [hx711], priority = 2)]
     async fn read_data(cx: read_data::Context) {
-        let data = cx.local.hx711.read_full_period(Gain::Apply128).await;
+        let data = cx
+            .local
+            .hx711
+            .read_full_period::<Mono, _, _>(Gain::Apply128)
+            .await;
         let decoded_data = cx.local.hx711.decode_data(data);
-        defmt::println!("Data [24-bit]: {:024b}\n Data: {:?}\nData [32-bit]: {:032b}", data, data, data);
+        defmt::println!(
+            "Data [24-bit]: {:024b}\n Data: {:?}\nData [32-bit]: {:032b}",
+            data,
+            data,
+            data
+        );
         defmt::println!("Decoded Data: {:?}", decoded_data.data_out);
-
     }
 
     #[task(binds = GPIOTE, shared = [gpiote])]

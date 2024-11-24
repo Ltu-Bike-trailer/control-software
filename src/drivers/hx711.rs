@@ -7,9 +7,11 @@
 #![no_std]
 #![allow(unused)]
 #![allow(missing_docs)]
+#![feature(generic_arg_infer)]
+#![allow(clippy::future_not_send)]
+use core::future::Future;
 
 use cortex_m::asm as _;
-use core::future::Future;
 use cortex_m_rt::entry;
 use defmt::{unwrap, Format};
 use defmt_rtt as _;
@@ -18,27 +20,29 @@ use embedded_hal::{
     digital::{InputPin, OutputPin},
 };
 use rtic_monotonics::{
-    nrf::timer::{ExtU64, Timer0 as Mono},
-    systick::fugit::Duration,
+    fugit::{Duration, ExtU64},
     Monotonic,
 };
 
-pub type Instant = <Mono as rtic_monotonics::Monotonic>::Instant;
-
-
 /// Hx711 driver struct.
 pub struct Hx711Driver<PINOUT: OutputPin + Send, PININ: InputPin + Send> {
+    /// Clock pin, for `Power down control (high active) and serial clock
+    /// input`.
     pub pd_sck: PINOUT,
+    /// Serial data output pin, act as "data in" to MCU master.
     pub dout: PININ,
+    /// The associated data to the `dout` pin.
     pub dout_data: i32,
-    pub bit_index: u8,
-    pub gain: Gain,
+    /// Act as a counter, to check until all 24 bits are shifted out.
+    bit_index: u8,
+    /// Applied gain-value for next conversion period.
+    gain: Gain,
 }
 
 #[derive(Debug)]
-/// This represent one data sample for one period conversion. 
+/// This represent one data sample for one period conversion.
 pub struct DataSample {
-    /// Represent the 24-bit signed (two's complement) data output. 
+    /// Represent the 24-bit signed (two's complement) data output.
     pub data_out: i32,
     /// Represent the applied gain for next conversion period.     
     pub next_gain: Gain,
@@ -52,8 +56,11 @@ pub struct DataSample {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
 pub enum Gain {
+    /// This would apply 128 in gain for next upcoming reading period.
     Apply128 = 25,
+    /// This would apply 32 in gain for next upcoming reading period.
     Apply32 = 26,
+    /// This would apply 27 in gain for next upcoming reading period.
     Apply64 = 27,
 }
 
@@ -61,7 +68,7 @@ pub enum Gain {
 /// T2: `PD_SCK` rising edge to DOUT data ready.
 /// T3: `PD_SCK` high time.
 /// T4: `PD_SCK` low time.
-pub enum DataTiming {
+enum DataTiming {
     /// MIN 0.1 µs .
     T1,
     /// MAX 0.1 µs.
@@ -75,7 +82,6 @@ pub enum DataTiming {
 impl<const NOM: u32, const DENOM: u32> From<DataTiming> for Duration<u64, NOM, DENOM> {
     #[allow(clippy::match_same_arms)]
     fn from(val: DataTiming) -> Self {
-        //DataTiming::T1 =>rtic_monotonics::nrf::rtc::ExtU64::micros(1),
         match val {
             DataTiming::T1 => 100.nanos(), // 0.1 µs
             DataTiming::T2 => 10.nanos(),  // 0.01 µs
@@ -96,7 +102,13 @@ impl From<Gain> for u8 {
 }
 
 impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ> {
-    pub const CALIBRATION_CONST: i32 = 3065448 as i32;
+    /// This is just a placeholder or constant for the calibration parameter.
+    ///
+    /// #NOTE
+    ///
+    /// This is just for showcasing, and need implemention for the
+    /// `run_calibration` method.
+    pub const CALIBRATION_CONST: i32 = 3_065_448_i32;
 
     /// Initialize and creates a new HX711 driver instance.
     pub const fn init(sck: PINOUT, digital_out: PININ, gain_amount: Gain) -> Self {
@@ -113,16 +125,19 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
     /// It starts with the MSB and ends with LSB.
     ///
     /// "By applying 25~27 positive clock pulses at the
-    /// PD_SCK pin, data is shifted out from the DOUT output pin.
+    /// `PD_SCK` pin, data is shifted out from the DOUT output pin.
     /// Each `PD_SCK` pulse shifts out one bit,
     /// starting with the MSB bit first, until all 24 bits are
     /// shifted out".
-    async fn read_data_pulse(&mut self, stop_count: u8) -> bool{
+    async fn read_data_pulse<T, const NOM: u32, const DENOM: u32>(&mut self, stop_count: u8) -> bool
+    where
+        T: Monotonic<Duration = rtic_monotonics::fugit::Duration<u64, NOM, DENOM>> + Send,
+    {
         let mut read_done = false;
         self.pd_sck.set_high();
 
         if (self.bit_index < 24) {
-            Mono::delay(DataTiming::T2.into()).await;
+            T::delay(DataTiming::T2.into()).await;
             let read = i32::from(unsafe { self.dout.is_high().unwrap_unchecked() });
             self.dout_data = (self.dout_data << 1) | read;
         }
@@ -134,33 +149,35 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
         }
         self.bit_index += 1;
 
-        Mono::delay(DataTiming::T3.into()).await;
+        T::delay(DataTiming::T3.into()).await;
         self.pd_sck.set_low();
-        Mono::delay(DataTiming::T4.into()).await;
+        T::delay(DataTiming::T4.into()).await;
 
         read_done
     }
 
     /// This method, would apply the gain for the next data
-    /// sample period. 
+    /// sample period.
     fn next_conversion_gain(&mut self, gain_amount: Gain) -> u8 {
         self.gain = gain_amount;
-        let stop_index: u8 = match gain_amount {
-            Gain::Apply128 => Gain::Apply128.into(),
-            Gain::Apply32 => Gain::Apply32.into(),
-            Gain::Apply64 => Gain::Apply64.into(),
-        };
+        let stop_index: u8 = gain_amount.into();
         stop_index - 1
     }
 
-    /// Reads a 24-bit full period data. Where data is 
+    /// Reads a 24-bit full period data. Where data is
     /// shifted out on the `dout` pin
-    pub async fn read_full_period(&mut self, next_gain: Gain) -> i32 {
+    pub async fn read_full_period<T, const NOM: u32, const DENOM: u32>(
+        &mut self,
+        next_gain: Gain,
+    ) -> i32
+    where
+        T: Monotonic<Duration = rtic_monotonics::fugit::Duration<u64, NOM, DENOM>> + Send,
+    {
         let stop_count = self.next_conversion_gain(next_gain);
-        Mono::delay(DataTiming::T1.into()).await;
+        T::delay(DataTiming::T1.into()).await;
         loop {
             // Apply 25~27 positive clock pulses here
-            let full_read = self.read_data_pulse(stop_count).await;
+            let full_read = self.read_data_pulse::<T, NOM, DENOM>(stop_count).await;
             if (full_read) {
                 let data: i32 = self.dout_data;
                 self.dout_data = 0i32;
@@ -169,23 +186,19 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
         }
     }
 
-    /// Under progess - but should return the decoded data struct. 
+    /// Under progess - but should return the decoded data struct.
     pub fn decode_data(&mut self, data_in: i32) -> DataSample {
         // Two's complement logic and apply gain and return data...
         // Can I use i32 directly (two's complement) or do I need to wrap,
         // and convert the u32 to i32?
         //let data_sample = unsafe { i32::try_from(data_in).unwrap_unchecked() };
-        
-        let data_sample = if data_in >= 0x800000 && data_in < 0x7FFFFF {
-            //data_in.wrapping_neg() - Self::CALIBRATION_CONST
-            data_in
 
+        let data_sample = if data_in & 0x0080_0000 != 0 {
+            //data_in.wrapping_neg() - Self::CALIBRATION_CONST
+            data_in | !0x00FF_FFFF
         } else {
             data_in
-        } ;
-        // if x >= 0x8000000 then x | !0xFFFFFF else dat
-        // Does the next conversion gain reflect directly in the output bits for one
-        // period?
+        };
 
         //TODO: - Define a new data struct, that return the gain, and the data bits.
         DataSample {
@@ -194,8 +207,8 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
         }
     }
 
-    /// Calibration logic - TODO... 
-    pub fn run_calibration(&mut self, num_epochs: u8){
-        
+    /// Calibration logic - TODO...
+    pub fn run_calibration(&mut self, num_epochs: u8) {
+        unimplemented!()
     }
 }
