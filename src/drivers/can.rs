@@ -1057,7 +1057,6 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
                 //self.write_register(MCP2515Register::RXB0CTRL, 0b0010_0000);
                 // With rollover if RXB0 is full.
                 self.write_register(MCP2515Register::RXB0CTRL, 0b0010_0100);
-
                 self.write_register(MCP2515Register::RXB1CTRL, 0b0010_0000);
             }
         }
@@ -1386,7 +1385,6 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
     ) -> Option<CanMessage> {
         let canintf = self.read_register(MCP2515Register::CANINTF, 0x00).unwrap();
         self.message_error_check(canintf);
-
         defmt::println!("CANINTF register bits: {:08b}", canintf);
 
         match received_interrupt {
@@ -1406,18 +1404,19 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
                 self.busy_tx[TXBN::TXB0.idx()] = false;
 
                 self.clear_interrupt_flag(2);
-                //self.tx_pending(false);
                 let all_handled = self.interrupt_is_cleared();
                 None
             }
             InterruptFlagCode::TXB1Interrupt => {
                 defmt::println!("TXB1 successfully transmitted a message!");
                 self.busy_tx[TXBN::TXB1.idx()] = false;
+                self.clear_interrupt_flag(3);
                 None
             }
             InterruptFlagCode::TXB2Interrupt => {
                 defmt::println!("TXB2 successfully transmitted a message!");
                 self.busy_tx[TXBN::TXB2.idx()] = false;
+                self.clear_interrupt_flag(4);
                 None
             }
             InterruptFlagCode::RXB0Interrupt => {
