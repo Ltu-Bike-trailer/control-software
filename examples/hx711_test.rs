@@ -107,6 +107,8 @@ mod app {
             .set_period(500u32.hz())
             .enable();
 
+        read_data::spawn(true);
+
         (Shared { gpiote, pwm }, Local {
             hx711: hx711_instance,
         })
@@ -122,12 +124,26 @@ mod app {
     }
 
     #[task(local = [hx711], priority = 2)]
-    async fn read_data(cx: read_data::Context) {
-        let data = cx.local.hx711.read_full_period(Gain::Apply128).await;
-        let decoded_data = cx.local.hx711.decode_data(data);
-        defmt::println!("Data [24-bit]: {:024b}\n Data: {:?}\nData [32-bit]: {:032b}", data, data, data);
-        defmt::println!("Decoded Data: {:?}", decoded_data.data_out);
+    async fn read_data(cx: read_data::Context, should_calibrate: bool) {
+        if should_calibrate {
+            let mut calibrator = Calibrator::new(cx.local.hx711, [0., 0., 0.], 10);
+            while let Some(val) = calibrator.calibrate_next().await {
+                // TODO: Actually wait for button interrupt here.
+            }
 
+            let (_, a, b) = calibrator.complete();
+            defmt::info!("Calibration done : y = {}x + {}", a, b);
+            return;
+        }
+        let data = cx.local.hx711.read_full_period(Gain::Apply128).await;
+        let decoded_data = cx.local.hx711.decode_data_calibrated(data);
+        defmt::println!(
+            "Data [24-bit]: {:024b}\n Data: {:?}\nData [32-bit]: {:032b}",
+            data,
+            data,
+            data
+        );
+        defmt::println!("Decoded Data: {:?}", decoded_data.data_out);
     }
 
     #[task(binds = GPIOTE, shared = [gpiote])]
@@ -135,7 +151,7 @@ mod app {
         let handle = cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
                 defmt::info!("Analog data received!");
-                read_data::spawn();
+                read_data::spawn(false);
                 gpiote.channel0().reset_events();
             }
         });

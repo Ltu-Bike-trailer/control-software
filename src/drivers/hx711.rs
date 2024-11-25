@@ -8,8 +8,9 @@
 #![allow(unused)]
 #![allow(missing_docs)]
 
-use cortex_m::asm as _;
 use core::future::Future;
+
+use cortex_m::asm as _;
 use cortex_m_rt::entry;
 use defmt::{unwrap, Format};
 use defmt_rtt as _;
@@ -17,6 +18,7 @@ use embedded_hal::{
     delay::DelayNs,
     digital::{InputPin, OutputPin},
 };
+use matrs::{matrix::Matrix, vec::Vector, MatrixInterface};
 use rtic_monotonics::{
     nrf::timer::{ExtU64, Timer0 as Mono},
     systick::fugit::Duration,
@@ -24,7 +26,6 @@ use rtic_monotonics::{
 };
 
 pub type Instant = <Mono as rtic_monotonics::Monotonic>::Instant;
-
 
 /// Hx711 driver struct.
 pub struct Hx711Driver<PINOUT: OutputPin + Send, PININ: InputPin + Send> {
@@ -36,10 +37,10 @@ pub struct Hx711Driver<PINOUT: OutputPin + Send, PININ: InputPin + Send> {
 }
 
 #[derive(Debug)]
-/// This represent one data sample for one period conversion. 
+/// This represent one data sample for one period conversion.
 pub struct DataSample {
-    /// Represent the 24-bit signed (two's complement) data output. 
-    pub data_out: i32,
+    /// Represent the 24-bit signed (two's complement) data output.
+    pub data_out: f32,
     /// Represent the applied gain for next conversion period.     
     pub next_gain: Gain,
 }
@@ -117,7 +118,7 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
     /// Each `PD_SCK` pulse shifts out one bit,
     /// starting with the MSB bit first, until all 24 bits are
     /// shifted out".
-    async fn read_data_pulse(&mut self, stop_count: u8) -> bool{
+    async fn read_data_pulse(&mut self, stop_count: u8) -> bool {
         let mut read_done = false;
         self.pd_sck.set_high();
 
@@ -142,7 +143,7 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
     }
 
     /// This method, would apply the gain for the next data
-    /// sample period. 
+    /// sample period.
     fn next_conversion_gain(&mut self, gain_amount: Gain) -> u8 {
         self.gain = gain_amount;
         let stop_index: u8 = match gain_amount {
@@ -153,7 +154,7 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
         stop_index - 1
     }
 
-    /// Reads a 24-bit full period data. Where data is 
+    /// Reads a 24-bit full period data. Where data is
     /// shifted out on the `dout` pin
     pub async fn read_full_period(&mut self, next_gain: Gain) -> i32 {
         let stop_count = self.next_conversion_gain(next_gain);
@@ -169,33 +170,109 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
         }
     }
 
-    /// Under progess - but should return the decoded data struct. 
+    /// Converts the read data according to calibration.
+    ///
+    /// ## Safety
+    ///
+    /// This function is safe given that the calibration procedure has been
+    /// performed at least once on this machine.
+    pub fn decode_data_calibrated(&mut self, data_in: i32) -> DataSample {
+        let mut ret = self.decode_data(data_in);
+        ret.data_out = unsafe {
+            ret.data_out * CALIBRATION_GAIN.assume_init() + CALIBRATION_OFFSET.assume_init()
+        };
+        ret
+    }
+
+    /// Under progess - but should return the decoded data struct.
     pub fn decode_data(&mut self, data_in: i32) -> DataSample {
         // Two's complement logic and apply gain and return data...
         // Can I use i32 directly (two's complement) or do I need to wrap,
         // and convert the u32 to i32?
         //let data_sample = unsafe { i32::try_from(data_in).unwrap_unchecked() };
-        
+
         let data_sample = if data_in >= 0x800000 && data_in < 0x7FFFFF {
             //data_in.wrapping_neg() - Self::CALIBRATION_CONST
             data_in
-
         } else {
             data_in
-        } ;
+        };
         // if x >= 0x8000000 then x | !0xFFFFFF else dat
         // Does the next conversion gain reflect directly in the output bits for one
         // period?
 
         //TODO: - Define a new data struct, that return the gain, and the data bits.
         DataSample {
-            data_out: data_sample,
+            data_out: data_sample as f32,
             next_gain: self.gain,
         }
     }
 
-    /// Calibration logic - TODO... 
-    pub fn run_calibration(&mut self, num_epochs: u8){
-        
+    /// Calibration logic - TODO...
+    pub fn run_calibration(&mut self, num_epochs: u8) {}
+}
+
+#[link(section = ".text")]
+static mut CALIBRATION_GAIN: core::mem::MaybeUninit<f32> =
+    unsafe { core::mem::MaybeUninit::uninit() };
+#[link(section = ".text")]
+static mut CALIBRATION_OFFSET: core::mem::MaybeUninit<f32> =
+    unsafe { core::mem::MaybeUninit::uninit() };
+
+pub struct Calibrator<'driver, PINOUT: OutputPin + Send, PININ: InputPin + Send, const N: usize> {
+    driver: &'driver mut Hx711Driver<PINOUT, PININ>,
+    weights: Vector<f32, N>,
+    measurements: Matrix<f32, N, 2>,
+    ptr: usize,
+    epochs: usize,
+}
+
+impl<'driver, PINOUT: OutputPin + Send, PININ: InputPin + Send, const N: usize>
+    Calibrator<'driver, PINOUT, PININ, N>
+{
+    pub fn new(
+        driver: &'driver mut Hx711Driver<PINOUT, PININ>,
+        weights: [f32; N],
+        epochs: usize,
+    ) -> Self {
+        Self {
+            driver,
+            weights: Vector::new_from_data(weights),
+            measurements: Matrix::new(),
+            ptr: 0,
+            epochs,
+        }
+    }
+
+    /// Runs calibration on the provided vector of weights.
+    ///
+    /// Returns the measurements if available.
+    pub async fn calibrate_next(&mut self) -> Option<f32> {
+        if self.ptr >= N {
+            return None;
+        }
+
+        let mut measured = 0.;
+        for _idx in 0..self.epochs {
+            let sample = self.driver.read_full_period(Gain::Apply32).await;
+            measured += self.driver.decode_data(sample).data_out as f32;
+        }
+
+        measured /= self.epochs as f32;
+        self.measurements
+            .set_row(self.ptr, Vector::new_from_data([measured, 1.]));
+
+        Some(measured)
+    }
+
+    /// Completes the calibration. Returning the polynomial factors.
+    pub fn complete(mut self) -> (&'driver mut Hx711Driver<PINOUT, PININ>, f32, f32) {
+        // Assume first order polynomial.
+        let [a, b] = self.measurements.linreg(&self.weights).data();
+        unsafe {
+            CALIBRATION_GAIN = core::mem::MaybeUninit::new(a);
+            CALIBRATION_OFFSET = core::mem::MaybeUninit::new(b);
+        }
+        (self.driver, a, b)
     }
 }

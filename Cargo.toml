@@ -21,13 +21,15 @@ rtic-sync = "1.3.0"
 embedded-hal = "1.0.0"
 statics = { path = "./statics" }
 
-lib = { path = "./lib",default-features = false }
+lib = { path = "./lib", default-features = false }
 # Helpers
 
 ## Defines a double ended queue implementation of arrays instead of vectors
 arraydeque = { version = "0.5.1", default-features = false }
 embedded-can = "0.4.1"
 nb = "1.1.0"
+
+matrs = { git = "https://github.com/ivajon/matrix_math/" }
 
 # cargo build/run
 [profile.dev]
