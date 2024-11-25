@@ -367,6 +367,7 @@ mod etc {
         ret
     }
     #[task(local = [phase1,phase2,phase3],shared = [duty,pattern],priority = 2)]
+    #[inline(never)]
     /// Drives the phases of the motor.
     ///
     /// This is done by disabling the high/low side of each phase with respect
@@ -414,42 +415,52 @@ mod etc {
             // Apply the switching pattern.
             //
             // If any of the phases tries to kill the system we simply return early.
-            macro_rules! apply {
-                (
-                    $($value:literal;)*
-                ) => {
-                    paste ! {
-                        match drive_pattern {
-                            $(
-                                [<$value>] => {
-                                    phase1.modify_channels::<2,{field_extract::<0,$value>()}>();
-                                    phase2.modify_channels::<2,{field_extract::<1,$value>()}>();
-                                    phase3.modify_channels::<2,{field_extract::<2,$value>()}>();
-                                }
-                            )*,
-                            _ => unreachable!()
+            #[inline(never)]
+            #[unsafe(no_mangle)]
+            fn apply(
+                drive_pattern: u8,
+                phase1: &mut Pwm<PWM0>,
+                phase2: &mut Pwm<PWM1>,
+                phase3: &mut Pwm<PWM2>,
+            ) {
+                macro_rules! apply {
+                    (
+                        $($value:literal;)*
+                    ) => {
+                        paste ! {
+                            match drive_pattern {
+                                $(
+                                    [<$value>] => {
+                                        phase1.modify_channels::<2,{field_extract::<0,$value>()}>();
+                                        phase2.modify_channels::<2,{field_extract::<1,$value>()}>();
+                                        phase3.modify_channels::<2,{field_extract::<2,$value>()}>();
+                                    }
+                                )*,
+                                _ => unreachable!()
+                            }
                         }
-                    }
-                };
+                    };
+                }
+                apply!(
+                    0b00_00_00; 0b00_00_01; 0b00_00_10; 0b00_00_11;
+                    0b00_01_00; 0b00_01_01; 0b00_01_10; 0b00_01_11;
+                    0b00_10_00; 0b00_10_01; 0b00_10_10; 0b00_10_11;
+                    0b00_11_00; 0b00_11_01; 0b00_11_10; 0b00_11_11;
+                    0b01_00_00; 0b01_00_01; 0b01_00_10; 0b01_00_11;
+                    0b01_01_00; 0b01_01_01; 0b01_01_10; 0b01_01_11;
+                    0b01_10_00; 0b01_10_01; 0b01_10_10; 0b01_10_11;
+                    0b01_11_00; 0b01_11_01; 0b01_11_10; 0b01_11_11;
+                    0b10_00_00; 0b10_00_01; 0b10_00_10; 0b10_00_11;
+                    0b10_01_00; 0b10_01_01; 0b10_01_10; 0b10_01_11;
+                    0b10_10_00; 0b10_10_01; 0b10_10_10; 0b10_10_11;
+                    0b10_11_00; 0b10_11_01; 0b10_11_10; 0b10_11_11;
+                    0b11_00_00; 0b11_00_01; 0b11_00_10; 0b11_00_11;
+                    0b11_01_00; 0b11_01_01; 0b11_01_10; 0b11_01_11;
+                    0b11_10_00; 0b11_10_01; 0b11_10_10; 0b11_10_11;
+                    0b11_11_00; 0b11_11_01; 0b11_11_10; 0b11_11_11;
+                );
             }
-            apply!(
-                0b00_00_00; 0b00_00_01; 0b00_00_10; 0b00_00_11;
-                0b00_01_00; 0b00_01_01; 0b00_01_10; 0b00_01_11;
-                0b00_10_00; 0b00_10_01; 0b00_10_10; 0b00_10_11;
-                0b00_11_00; 0b00_11_01; 0b00_11_10; 0b00_11_11;
-                0b01_00_00; 0b01_00_01; 0b01_00_10; 0b01_00_11;
-                0b01_01_00; 0b01_01_01; 0b01_01_10; 0b01_01_11;
-                0b01_10_00; 0b01_10_01; 0b01_10_10; 0b01_10_11;
-                0b01_11_00; 0b01_11_01; 0b01_11_10; 0b01_11_11;
-                0b10_00_00; 0b10_00_01; 0b10_00_10; 0b10_00_11;
-                0b10_01_00; 0b10_01_01; 0b10_01_10; 0b10_01_11;
-                0b10_10_00; 0b10_10_01; 0b10_10_10; 0b10_10_11;
-                0b10_11_00; 0b10_11_01; 0b10_11_10; 0b10_11_11;
-                0b11_00_00; 0b11_00_01; 0b11_00_10; 0b11_00_11;
-                0b11_01_00; 0b11_01_01; 0b11_01_10; 0b11_01_11;
-                0b11_10_00; 0b11_10_01; 0b11_10_10; 0b11_10_11;
-                0b11_11_00; 0b11_11_01; 0b11_11_10; 0b11_11_11;
-            );
+            apply(drive_pattern, phase1, phase2, phase3);
             // This is a bit faster.
             // The sign of the f32 is only relevant when we are setting the direction to
             // rotate, not while setting the duty cycles of the mosfets.
