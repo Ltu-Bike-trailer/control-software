@@ -299,7 +299,7 @@ mod app {
     ///
     /// This function should only be called by the PID controller.
     ///
-    /// This ensures that the velocity can be set without dependance on the rate
+    /// This ensures that the velocity can be set without dependence on the rate
     /// of interrupts.
     async fn motor_driver(cx: motor_driver::Context) {
         let (mut drive_pattern, mut duty) = (cx.shared.drive_pattern, cx.shared.duty);
