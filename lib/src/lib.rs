@@ -4,11 +4,9 @@
 //!
 //! Defines our can protocol and message enumerations for trivial parsing.
 //!
-//! ## [`PID`](pid)
 //!
 //! Defines a simple PID controller.
 //!
-//! ## [`Gain scheduled`](gain_scheduled)
 //!
 //! Defines a PID controller that follows a parameter scheduled defined at
 //! compile time.
@@ -50,7 +48,7 @@
 #![cfg_attr(not(feature = "std"), no_std, allow(internal_features))]
 pub mod constants;
 // Remove these for now. They are unused and will likely continue to be unused.
-pub mod gain_scheduled;
-pub mod pid;
+//pub mod gain_scheduled;
+//pub mod pid;
 pub mod protocol;
 pub mod wrapper;
