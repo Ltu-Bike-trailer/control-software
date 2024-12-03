@@ -33,11 +33,24 @@
     clippy::cast_precision_loss,
     clippy::match_bool,
     // I see the benefits of this but it is not worth it for our use case.
-    clippy::from_over_into
+    clippy::from_over_into,
+    unstable_features,
+    incomplete_features,
+    clippy::inline_always
 )]
-#![cfg_attr(not(feature = "std"), no_std)]
+#![feature(
+    f16,
+    generic_const_exprs,
+    const_trait_impl,
+    generic_associated_types_extended,
+    generic_const_items,
+    generic_arg_infer,
+    adt_const_params
+)]
+#![cfg_attr(not(feature = "std"), no_std, allow(internal_features))]
 pub mod constants;
-pub mod gain_scheduled;
-pub mod pid;
+// Remove these for now. They are unused and will likely continue to be unused.
+//pub mod gain_scheduled;
+//pub mod pid;
 pub mod protocol;
 pub mod wrapper;
