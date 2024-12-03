@@ -47,17 +47,18 @@ pub trait DoubleSize {
 
 /// Enumerates the error cases for the controller.
 #[derive(Debug)]
-pub enum ControllerError<Error: Debug, ConversionError: Debug> {
+pub enum ControllerError<Error: Debug> {
     /// User tried to use the controller before assigning a control sequence.
     BufferEmpty,
     /// The value written to the channel caused some error.
     ChannelError(Error),
-    /// Thrown when a conversion is non successful.
-    ConversionError(ConversionError),
     /// Value to large.
     ///
     /// This is thrown when a value is to large to fit in half the size.
     ValueToLarge,
+
+    /// Multiplication resulted in overflow
+    MultiplicationOverflow,
 }
 
 /// This assumes that we have a i32 as data.
@@ -65,7 +66,6 @@ pub struct Pid<
     Error: Debug,
     Interface: Channel<Error>,
     Output: Sized,
-    const BUFFER: usize,
     const KP: i32,
     const KI: i32,
     const KD: i32,
@@ -77,7 +77,7 @@ pub struct Pid<
 > {
     err: PhantomData<Error>,
     out: Interface,
-    reference: ArrayDeque<Output, BUFFER>,
+    reference: Output,
     previous: Output,
     // This might need to be changed in to i64 to not cause errors.
     integral: Output,
@@ -85,6 +85,48 @@ pub struct Pid<
     previous_actuation: Output,
 }
 
+/// This assumes that we have a i32 as data.
+pub struct PidFixedPoint<
+    Error: Debug,
+    const KP: u64,
+    const KI: u64,
+    const KD: u64,
+    const TS: u64,
+    const THRESHOLD_MAX: i32,
+    const THRESHOLD_MIN: i32,
+    const TIMESCALE: i64,
+    const FIXED_POINT_NOM: i64,
+    const FIXED_POINT_DENOM: i64,
+> {
+    err: PhantomData<Error>,
+    _out: u32,
+    reference: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM>,
+    previous: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM>,
+    // This might need to be changed in to i64 to not cause errors.
+    integral: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM>,
+    measurement: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM>,
+}
+/// This assumes that we have a i32 as data.
+pub struct PidF32<
+    Error: Debug,
+    const KP: u64,
+    const KI: u64,
+    const KD: u64,
+    const TS: u64,
+    const THRESHOLD_MAX: i32,
+    const THRESHOLD_MIN: i32,
+    const TIMESCALE: i64,
+    const FIXED_POINT_NOM: i64,
+    const FIXED_POINT_DENOM: i64,
+> {
+    err: PhantomData<Error>,
+    _out: u32,
+    reference: f32,
+    previous: f32,
+    // This might need to be changed in to i64 to not cause errors.
+    integral: f32,
+    measurement: f32,
+}
 /// This assumes that we have a i32 as data.
 pub struct PidDynamic<
     Error: Debug,
@@ -111,7 +153,7 @@ pub struct PidDynamic<
 
 /// Wraps the info about a specific time step in the control sequence.
 #[derive(Debug)]
-pub struct ControlInfo<Output: Sized + defmt::Format> {
+pub struct ControlInfo<Output: Sized> {
     /// The expected value.
     pub reference: Output,
     /// The actual value read from the [`Channel`].
@@ -130,10 +172,464 @@ pub struct ControlInfo<Output: Sized + defmt::Format> {
 
 impl<
         Error: Debug,
+        const KP: u64,
+        const KI: u64,
+        const KD: u64,
+        const TS: u64,
+        const THRESHOLD_MAX: i32,
+        const THRESHOLD_MIN: i32,
+        const TIMESCALE: i64,
+        const FIXED_POINT_NOM: i64,
+        const FIXED_POINT_DENOM: i64,
+    >
+    PidF32<
+        Error,
+        KP,
+        KI,
+        KD,
+        TS,
+        THRESHOLD_MAX,
+        THRESHOLD_MIN,
+        TIMESCALE,
+        FIXED_POINT_NOM,
+        FIXED_POINT_DENOM,
+    >
+where
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM } as usize]:,
+    [(); { FIXED_POINT_NOM * FIXED_POINT_DENOM } as usize]:,
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM }
+        as usize]:,
+    [(); { FIXED_POINT_NOM * FIXED_POINT_NOM } as usize]:,
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_NOM } as usize]:,
+    [(); { 1 * FIXED_POINT_NOM } as usize]:,
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM } as usize]:,
+    [(); { 1 * FIXED_POINT_DENOM } as usize]:,
+    [(); FIXED_POINT_DENOM as usize]:,
+    [(); FIXED_POINT_NOM as usize]:,
+{
+    const KD: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = FixedPoint::new(KD as i64);
+    const KI: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = FixedPoint::new(KI as i64);
+    const KP: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = FixedPoint::new(KP as i64);
+    const THRESHOLD_MAX: FixedPoint<1, 1> = FixedPoint::new(THRESHOLD_MAX as i64);
+    const THRESHOLD_MIN: FixedPoint<1, 1> = FixedPoint::new(THRESHOLD_MIN as i64);
+    const TS: FixedPoint<1, TIMESCALE> = FixedPoint::<1, TIMESCALE>::new(TS as i64).convert();
+    const TWO: FixedPoint<2, 1> = FixedPoint::<2, 1>::new(1).convert();
+
+    /// Creates a new controller that sets the output on the
+    /// [`Interface`](`Channel`) using a PID control strategy.
+    pub fn new() -> Self {
+        Self {
+            err: PhantomData,
+            reference: 0.,
+            previous: 0.,
+            integral: 0.,
+            measurement: 0.,
+            _out: 0,
+        }
+    }
+
+    /// Completely erases previous control signal.
+    #[inline(always)]
+    pub fn follow(&mut self, value: f32) {
+        self.reference = value;
+    }
+
+    /// Registers the most recent measurement.
+    #[inline(always)]
+    pub fn register_measurement(&mut self, value: f32) {
+        self.measurement = value;
+    }
+
+    /// Computes the control signal using a PID control strategy.
+    ///
+    /// if successful it returns the expected value and the read value.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the underlying [`Channel`] fails or
+    /// any numeric conversions fail.
+    #[inline(always)]
+    pub fn actuate(&mut self) -> Result<f32, ControllerError<Error>> {
+        let output = self.compute_output();
+        Ok(output)
+    }
+
+    /// Computes the latest control output.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the underlying [`Channel`] fails or
+    /// any numeric conversions fail.
+    #[inline(always)]
+    fn compute_output(&mut self) -> f32 {
+        // TODO: Remove all of the converts. The entire point of this is to not use
+        // that.
+        let target = self.reference;
+
+        let actual = self.measurement;
+
+        let error = target - actual;
+
+        let p = error * (Self::KP).into_float();
+        // Integral is approximated as a sum of discrete signals.
+        let avg = self.previous + error;
+        let avg = avg / Self::TWO.into_float();
+        let avg = avg * Self::TS.into_float();
+        self.integral = self
+            .integral
+            .add(avg)
+            .min(Self::THRESHOLD_MAX.into_float())
+            .max(Self::THRESHOLD_MIN.into_float());
+
+        let i: f32 = self.integral * Self::KI.into_float();
+
+        let d: f32 = error - self.previous;
+        let d: f32 = d / Self::TS.into_float();
+        let d: f32 = d * Self::KD.into_float();
+
+        let output: f32 = p + i + d;
+        let output = output.clamp(
+            Self::THRESHOLD_MIN.into_float(),
+            Self::THRESHOLD_MAX.into_float(),
+        );
+        output
+
+        /*
+
+        // Compute the rate of change between previous time-step and this time-step.
+        let d = kd * time_scale * (error - self.previous) / ts;
+
+        self.previous = error;
+
+        let output = ((p + i + d) / fixed_point)
+            .max(threshold_min)
+            .min(threshold_max);
+
+        ControlInfo {
+            reference: target,
+            measured: actual,
+            actuation: output,
+            p,
+            i,
+            d,
+            pre_threshold: (p + i + d) / fixed_point,
+        }*/
+    }
+}
+
+impl<
+        Error: Debug,
+        const KP: u64,
+        const KI: u64,
+        const KD: u64,
+        const TS: u64,
+        const THRESHOLD_MAX: i32,
+        const THRESHOLD_MIN: i32,
+        const TIMESCALE: i64,
+        const FIXED_POINT_NOM: i64,
+        const FIXED_POINT_DENOM: i64,
+    >
+    PidFixedPoint<
+        Error,
+        KP,
+        KI,
+        KD,
+        TS,
+        THRESHOLD_MAX,
+        THRESHOLD_MIN,
+        TIMESCALE,
+        FIXED_POINT_NOM,
+        FIXED_POINT_DENOM,
+    >
+where
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM } as usize]:,
+    [(); { FIXED_POINT_NOM * FIXED_POINT_DENOM } as usize]:,
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM }
+        as usize]:,
+    [(); { FIXED_POINT_NOM * FIXED_POINT_NOM } as usize]:,
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_NOM } as usize]:,
+    [(); { 1 * FIXED_POINT_NOM } as usize]:,
+    [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM } as usize]:,
+    [(); { 1 * FIXED_POINT_DENOM } as usize]:,
+    [(); FIXED_POINT_DENOM as usize]:,
+    [(); FIXED_POINT_NOM as usize]:,
+{
+    const KD: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = FixedPoint::new(KD as i64);
+    const KI: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = FixedPoint::new(KI as i64);
+    const KP: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = FixedPoint::new(KP as i64);
+    const THRESHOLD_MAX: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> =
+        FixedPoint::new(THRESHOLD_MAX as i64);
+    const THRESHOLD_MIN: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> =
+        FixedPoint::new(THRESHOLD_MIN as i64);
+    const TS: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> =
+        FixedPoint::<1, TIMESCALE>::new(TS as i64).convert();
+    const TWO: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> =
+        FixedPoint::<2, 1>::new(1).convert();
+
+    /// Creates a new controller that sets the output on the
+    /// [`Interface`](`Channel`) using a PID control strategy.
+    pub fn new() -> Self {
+        Self {
+            err: PhantomData,
+            reference: FixedPoint::new(0),
+            previous: FixedPoint::new(0),
+            integral: FixedPoint::new(0),
+            measurement: FixedPoint::new(0),
+            _out: 0,
+        }
+    }
+
+    /// Completely erases previous control signal.
+    #[inline(always)]
+    pub fn follow(&mut self, value: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM>) {
+        self.reference = value;
+    }
+
+    /// Registers the most recent measurement.
+    #[inline(always)]
+    pub fn register_measurement(&mut self, value: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM>) {
+        self.measurement = value;
+    }
+
+    /// Computes the control signal using a PID control strategy.
+    ///
+    /// if successful it returns the expected value and the read value.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the underlying [`Channel`] fails or
+    /// any numeric conversions fail.
+    #[inline(always)]
+    pub fn actuate(&mut self) -> Result<f32, ControllerError<Error>> {
+        let output = self.compute_output();
+        Ok(output)
+    }
+
+    /// Computes the latest control output.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the underlying [`Channel`] fails or
+    /// any numeric conversions fail.
+    #[inline(always)]
+    fn compute_output(&mut self) -> f32
+    where
+        [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM } as usize]:,
+        [(); { FIXED_POINT_NOM * FIXED_POINT_DENOM } as usize]:,
+        [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM }
+            as usize]:,
+        [(); { FIXED_POINT_NOM * FIXED_POINT_NOM } as usize]:,
+        [(); { FIXED_POINT_DENOM * FIXED_POINT_NOM } as usize]:,
+        [(); { 1 * FIXED_POINT_NOM } as usize]:,
+        [(); { FIXED_POINT_DENOM * FIXED_POINT_DENOM * FIXED_POINT_DENOM } as usize]:,
+        [(); { 1 * FIXED_POINT_DENOM } as usize]:,
+        [(); FIXED_POINT_DENOM as usize]:,
+        [(); FIXED_POINT_NOM as usize]:,
+    {
+        // TODO: Remove all of the converts. The entire point of this is to not use
+        // that.
+        let target = self.reference;
+
+        let actual = self.measurement;
+
+        let error: FixedPoint<1, FIXED_POINT_DENOM> = target.sub(actual).convert();
+
+        let p: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = error.mul(Self::KP).convert();
+        // Integral is approximated as a sum of discrete signals.
+        let avg: FixedPoint<1, FIXED_POINT_DENOM> = self.previous.add(error).convert();
+        let avg: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = avg.div(Self::TWO).convert();
+        let avg: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = avg.mul(Self::TS).convert();
+        self.integral = self
+            .integral
+            .add(avg)
+            .const_min::<_, _, FIXED_POINT_NOM, FIXED_POINT_DENOM>(&Self::THRESHOLD_MAX)
+            .const_max(&Self::THRESHOLD_MIN);
+
+        let i: FixedPoint<1, FIXED_POINT_DENOM> = self.integral.mul(Self::KI).convert();
+
+        let d: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = error.sub(self.previous).convert();
+        let d: FixedPoint<FIXED_POINT_NOM, FIXED_POINT_DENOM> = d.div(Self::TS).convert();
+        let d: FixedPoint<1, FIXED_POINT_DENOM> = d.mul(Self::KD).convert();
+
+        let output: FixedPoint<1, FIXED_POINT_DENOM> = p.add(i).convert();
+        output.add(d).into_float()
+
+        /*
+
+        // Compute the rate of change between previous time-step and this time-step.
+        let d = kd * time_scale * (error - self.previous) / ts;
+
+        self.previous = error;
+
+        let output = ((p + i + d) / fixed_point)
+            .max(threshold_min)
+            .min(threshold_max);
+
+        ControlInfo {
+            reference: target,
+            measured: actual,
+            actuation: output,
+            p,
+            i,
+            d,
+            pre_threshold: (p + i + d) / fixed_point,
+        }*/
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy)]
+/// Represents a fixed point number.
+///
+/// This is intended to be used instead of a float to save mcp lcp instructions.
+pub struct FixedPoint<const NOM: i64, const DENOM: i64> {
+    val: i64,
+}
+
+#[allow(dead_code)]
+impl<const NOM: i64, const DENOM: i64> FixedPoint<NOM, DENOM> {
+    /// Returns a new instance of the fixed value.
+    #[inline(always)]
+    pub const fn new(val: i64) -> Self {
+        Self { val }
+    }
+
+    /// Returns the maximum of self or the other values.
+    #[inline(always)]
+    pub const fn const_max<
+        const ONOM: i64,
+        const ODENOM: i64,
+        const TNOM: i64,
+        const TDENOM: i64,
+    >(
+        &self,
+        other: &FixedPoint<ONOM, ODENOM>,
+    ) -> FixedPoint<TNOM, TDENOM> {
+        if self.val * (NOM * ODENOM) > other.val * (ONOM * DENOM) {
+            return self.convert();
+        }
+        return other.convert();
+    }
+
+    /// Returns the minimum of self or the other value.
+    #[inline(always)]
+    pub const fn const_min<
+        const ONOM: i64,
+        const ODENOM: i64,
+        const TNOM: i64,
+        const TDENOM: i64,
+    >(
+        &self,
+        other: &FixedPoint<ONOM, ODENOM>,
+    ) -> FixedPoint<TNOM, TDENOM> {
+        if self.val * (NOM * ODENOM) < other.val * (ONOM * DENOM) {
+            return self.convert();
+        }
+        return other.convert();
+    }
+
+    #[inline(always)]
+    /// Multiplies self with other.
+    pub const fn mul<const ONOM: i64, const ODENOM: i64>(
+        self,
+        other: FixedPoint<ONOM, ODENOM>,
+    ) -> FixedPoint<{ NOM * ONOM }, { DENOM * ODENOM }> {
+        FixedPoint {
+            val: self.val * other.val,
+        }
+    }
+
+    #[inline(always)]
+    /// Divides two numbers.
+    pub const fn div<const ONOM: i64, const ODENOM: i64>(
+        self,
+        other: FixedPoint<ONOM, ODENOM>,
+    ) -> FixedPoint<{ NOM * ODENOM }, { DENOM * ONOM }> {
+        FixedPoint {
+            // This is an issue. Look in to this :)
+            val: self.val / other.val,
+        }
+    }
+
+    #[inline(always)]
+    /// Returns the maximum of two values.
+    pub const fn max(a: i64, b: i64) -> i64 {
+        if a > b {
+            return a;
+        }
+        return b;
+    }
+
+    #[inline(always)]
+    /// Adds self to other.
+    pub const fn add<const ONOM: i64, const ODENOM: i64>(
+        self,
+        other: FixedPoint<ONOM, ODENOM>,
+    ) -> FixedPoint<1, { DENOM * ODENOM }>
+    where
+        [(); { DENOM * ODENOM } as usize]:,
+        [(); { ODENOM * DENOM } as usize]:,
+        [(); { DENOM * ODENOM } as usize]:,
+    {
+        FixedPoint {
+            // This is an issue. Look in to this :)
+
+            /*
+                   1         1
+               afb -   + dec -
+                   cf        fc
+            */
+            val: self.val * NOM * ODENOM + other.val * ONOM * DENOM,
+        }
+    }
+
+    #[inline(always)]
+    /// Subtract other from self.
+    pub const fn sub<const ONOM: i64, const ODENOM: i64>(
+        self,
+        other: FixedPoint<ONOM, ODENOM>,
+    ) -> FixedPoint<1, { DENOM * ODENOM }>
+    where
+        [(); { DENOM * ODENOM } as usize]:,
+    {
+        FixedPoint {
+            // This is an issue. Look in to this :)
+
+            /*
+                   1         1
+               afb --  - dec --
+                   cf        fc
+            */
+            val: self.val * NOM * ODENOM - other.val * ONOM * DENOM,
+        }
+    }
+
+    #[inline(always)]
+    /// Converts the number in to the destination size.
+    ///
+    /// This can cause precision.
+    pub const fn convert<const TNOM: i64, const TDENOM: i64>(self) -> FixedPoint<TNOM, TDENOM> {
+        if TNOM == NOM && DENOM == TDENOM {
+            return FixedPoint { val: self.val };
+        }
+
+        // a * b/c = d * e/f
+        debug_assert!(NOM * TDENOM > TNOM * DENOM);
+        let val = self.val * (NOM * TDENOM / (TNOM * DENOM));
+        FixedPoint { val }
+    }
+
+    #[inline(always)]
+    /// Converts the number in to a float.
+    pub const fn into_float(self) -> f32 {
+        (self.val as f32) * ({ NOM as f32 } / { DENOM as f32 })
+    }
+}
+
+impl<
+        Error: Debug,
         Interface: Channel<Error, Output = Output>,
-        Output: Sized + defmt::Format,
-        ConversionError: Debug,
-        const BUFFER: usize,
+        Output: Sized,
         const KP: i32,
         const KI: i32,
         const KD: i32,
@@ -147,7 +643,6 @@ impl<
         Error,
         Interface,
         Output,
-        BUFFER,
         KP,
         KI,
         KD,
@@ -169,7 +664,7 @@ where
         + PartialOrd
         + CmpExt,
     Output::Ret: Add<Output::Ret, Output = Output::Ret> + Div<Output::Ret, Output = Output::Ret>,
-    i32: Convert<Output, Error = ConversionError>,
+    i32: Convert<Output>,
 {
     /// Creates a new controller that sets the output on the
     /// [`Interface`](`Channel`) using a PID control strategy.
@@ -177,7 +672,7 @@ where
         Self {
             out: channel,
             err: PhantomData,
-            reference: ArrayDeque::new(),
+            reference: Output::default(),
             previous: Output::default(),
             integral: Output::default(),
             measurement: (0, Output::default()),
@@ -186,14 +681,8 @@ where
     }
 
     /// Completely erases previous control signals.
-    pub fn follow<I: IntoIterator<Item = Output>>(&mut self, values: I) {
-        self.reference.clear();
-        self.reference.extend(values);
-    }
-
-    /// Extends the reference signal with new values.
-    pub fn extend<I: IntoIterator<Item = Output>>(&mut self, values: I) {
-        self.reference.extend(values);
+    pub fn follow(&mut self, values: Output) {
+        self.reference = values;
     }
 
     /// Registers the most recent measurement.
@@ -209,49 +698,12 @@ where
     ///
     /// This function returns an error if the underlying [`Channel`] fails or
     /// any numeric conversions fail.
-    pub fn actuate_rate_limited(
-        &mut self,
-        rate_limit: Output,
-    ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>>
+    pub fn actuate(&mut self) -> Result<ControlInfo<Output>, ControllerError<Error>>
     where
         <Output as DoubleSize>::Ret: Debug + Copy,
         Output: Debug + Copy,
     {
-        let mut output_pre_rate_limit = self.compute_output()?;
-
-        let output = match (
-            output_pre_rate_limit.actuation > (self.previous_actuation + rate_limit),
-            output_pre_rate_limit.actuation < (self.previous_actuation - rate_limit),
-        ) {
-            (true, _) => self.previous_actuation + rate_limit,
-            (_, true) => self.previous_actuation - rate_limit,
-            (_, _) => output_pre_rate_limit.actuation,
-        };
-
-        self.out
-            .set(output)
-            .map_err(|err| ControllerError::ChannelError(err))?;
-        self.previous_actuation = output;
-        output_pre_rate_limit.actuation = output;
-        Ok(output_pre_rate_limit)
-    }
-
-    /// Computes the control signal using a PID control strategy.
-    ///
-    /// if successful it returns the expected value and the read value.
-    ///
-    /// # Errors
-    ///
-    /// This function returns an error if the underlying [`Channel`] fails or
-    /// any numeric conversions fail.
-    pub fn actuate(
-        &mut self,
-    ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>>
-    where
-        <Output as DoubleSize>::Ret: Debug + Copy,
-        Output: Debug + Copy,
-    {
-        let output = self.compute_output()?;
+        let output = self.compute_output();
 
         self.out
             .set(output.actuation)
@@ -267,25 +719,21 @@ where
     ///
     /// This function returns an error if the underlying [`Channel`] fails or
     /// any numeric conversions fail.
-    fn compute_output(
-        &mut self,
-    ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>> {
-        let target: Output = match self.reference.pop_front() {
-            Some(value) => value,
-            None => return Err(ControllerError::BufferEmpty),
-        };
+    #[inline(always)]
+    fn compute_output(&mut self) -> ControlInfo<Output> {
+        let target: Output = self.reference.clone();
 
-        let kp: Output = KP.convert()?;
-        let ki: Output = KI.convert()?;
-        let kd: Output = KD.convert()?;
+        let kp: Output = KP.convert();
+        let ki: Output = KI.convert();
+        let kd: Output = KD.convert();
 
-        let time_scale: Output = TIMESCALE.convert()?;
-        let ts: Output = TS.convert()?;
+        let time_scale: Output = TIMESCALE.convert();
+        let ts: Output = TS.convert();
 
-        let threshold_min = THRESHOLD_MIN.convert()?;
-        let threshold_max = THRESHOLD_MAX.convert()?;
+        let threshold_min = THRESHOLD_MIN.convert();
+        let threshold_max = THRESHOLD_MAX.convert();
 
-        let fixed_point = { 10i32.pow(FIXED_POINT) }.convert()?;
+        let fixed_point = { 10i32.pow(FIXED_POINT) }.convert();
 
         let actual: Output = self.measurement.1;
 
@@ -295,15 +743,17 @@ where
 
         // Integral is approximated as a sum of discrete signals.
         let avg: Output::Ret = self.previous.double_size() + error.double_size();
-        let two: Output = 2.convert()?;
+        let two: Output = 2.convert();
         let two = two.double_size();
-        self.integral +=
-            (Output::half_size(avg / two).map_err(|_| ControllerError::ValueToLarge)?) * ts
-                / time_scale;
+        if let Ok(val) = Output::half_size(avg / two) {
+            self.integral += val * ts / time_scale;
+        } else {
+            self.integral = Output::default();
+        }
 
         self.integral = self.integral.max(threshold_min).min(threshold_max);
 
-        let i = self.integral * ki;
+        let i = self.integral.mul(ki);
 
         // Compute the rate of change between previous time-step and this time-step.
         let d = kd * time_scale * (error - self.previous) / ts;
@@ -314,7 +764,7 @@ where
             .max(threshold_min)
             .min(threshold_max);
 
-        Ok(ControlInfo {
+        ControlInfo {
             reference: target,
             measured: actual,
             actuation: output,
@@ -322,15 +772,14 @@ where
             i,
             d,
             pre_threshold: (p + i + d) / fixed_point,
-        })
+        }
     }
 }
 
 impl<
         Error: Debug,
         Interface: Channel<Error, Output = Output>,
-        Output: Sized + defmt::Format,
-        ConversionError: Debug,
+        Output: Sized,
         const BUFFER: usize,
         const KP: i32,
         const KI: i32,
@@ -365,8 +814,8 @@ where
         + PartialOrd
         + CmpExt,
     Output::Ret: Add<Output::Ret, Output = Output::Ret> + Div<Output::Ret, Output = Output::Ret>,
-    i32: Convert<Output, Error = ConversionError>,
-    u64: Convert<Output, Error = ConversionError>,
+    i32: Convert<Output>,
+    u64: Convert<Output>,
 {
     /// Creates a new controller that sets the output on the
     /// [`Interface`](`Channel`) using a PID control strategy.
@@ -410,7 +859,7 @@ where
         &mut self,
         rate_limit: Output,
         ts: u64,
-    ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>>
+    ) -> Result<ControlInfo<Output>, ControllerError<Error>>
     where
         <Output as DoubleSize>::Ret: Debug + Copy,
         Output: Debug + Copy,
@@ -442,10 +891,7 @@ where
     ///
     /// This errors if any of the numeric conversions fail or the [`Channel`]
     /// fails.
-    pub fn actuate(
-        &mut self,
-        ts: u64,
-    ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>>
+    pub fn actuate(&mut self, ts: u64) -> Result<ControlInfo<Output>, ControllerError<Error>>
     where
         <Output as DoubleSize>::Ret: Debug + Copy,
         Output: Debug + Copy,
@@ -466,26 +912,23 @@ where
     /// # Errors
     ///
     /// If any numeric conversions fail.
-    fn compute_output(
-        &mut self,
-        ts: u64,
-    ) -> Result<ControlInfo<Output>, ControllerError<Error, ConversionError>> {
+    fn compute_output(&mut self, ts: u64) -> Result<ControlInfo<Output>, ControllerError<Error>> {
         let target: Output = match self.reference.pop_front() {
             Some(value) => value,
             None => return Err(ControllerError::BufferEmpty),
         };
 
-        let kp: Output = KP.convert()?;
-        let ki: Output = KI.convert()?;
-        let kd: Output = KD.convert()?;
+        let kp: Output = KP.convert();
+        let ki: Output = KI.convert();
+        let kd: Output = KD.convert();
 
-        let time_scale: Output = TIMESCALE.convert()?;
-        let ts: Output = ts.convert()?;
+        let time_scale: Output = TIMESCALE.convert();
+        let ts: Output = ts.convert();
 
-        let threshold_min = THRESHOLD_MIN.convert()?;
-        let threshold_max = THRESHOLD_MAX.convert()?;
+        let threshold_min = THRESHOLD_MIN.convert();
+        let threshold_max = THRESHOLD_MAX.convert();
 
-        let fixed_point = { 10i32.pow(FIXED_POINT) }.convert()?;
+        let fixed_point = { 10i32.pow(FIXED_POINT) }.convert();
 
         let actual: Output = self.measurement.1;
 
@@ -495,7 +938,7 @@ where
 
         // Integral is approximated as a sum of discrete signals.
         let avg: Output::Ret = self.previous.double_size() + error.double_size();
-        let two: Output = 2.convert()?;
+        let two: Output = 2.convert();
         let two = two.double_size();
         self.integral +=
             (Output::half_size(avg / two).map_err(|_| ControllerError::ValueToLarge)?) * ts
@@ -612,55 +1055,77 @@ pub mod prelude {
             Ok(())
         }
     }
+    impl Channel<()> for i32 {
+        type Output = Self;
+
+        #[inline(always)]
+        fn set(&mut self, value: Self::Output) -> Result<(), ()> {
+            *self = value;
+            Ok(())
+        }
+    }
+    /*impl Channel<()> for u16 {
+        type Output = i32;
+
+        #[inline(always)]
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        fn set(&mut self, value: Self::Output) -> Result<(), ()> {
+            *self = value as Self;
+            Ok(())
+        }
+    }*/
+    impl Channel<()> for u16 {
+        type Output = f32;
+
+        #[inline(always)]
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        fn set(&mut self, value: Self::Output) -> Result<(), ()> {
+            *self = value as Self;
+            Ok(())
+        }
+    }
     pub use super::{Channel, Pid};
     pub use crate::new_pid;
 }
 
 mod sealed {
-    use core::{convert::Infallible, fmt::Debug};
-
-    use super::ControllerError;
 
     /// Converts a value in to the destination type if possible.
+
     pub trait Convert<Dest: Sized> {
-        /// The error value returned.
-        type Error: core::fmt::Debug;
         /// Converts the value in to the destination type.
-        fn convert(self) -> Result<Dest, Self::Error>;
+        fn convert(self) -> Dest;
     }
 
     impl Convert<Self> for i32 {
-        type Error = Infallible;
-
-        fn convert(self) -> Result<Self, Self::Error> {
-            Ok(self)
+        #[inline(always)]
+        fn convert(self) -> Self {
+            self
         }
     }
 
     impl Convert<i32> for u64 {
-        type Error = Infallible;
-
-        fn convert(self) -> Result<i32, Self::Error> {
-            Ok(self as i32)
+        #[inline(always)]
+        fn convert(self) -> i32 {
+            self as i32
         }
     }
 
     impl Convert<f32> for u64 {
-        type Error = Infallible;
-
-        fn convert(self) -> Result<f32, Self::Error> {
-            Ok(self as f32)
+        #[inline(always)]
+        fn convert(self) -> f32 {
+            self as f32
         }
     }
 
     impl Convert<f32> for i32 {
-        type Error = Infallible;
-
-        fn convert(self) -> Result<f32, Self::Error> {
-            Ok(self as f32)
+        #[inline(always)]
+        fn convert(self) -> f32 {
+            self as f32
         }
     }
     pub trait CmpExt {
+        #[inline(always)]
         fn max(self, other: Self) -> Self
         where
             Self: PartialOrd<Self> + Sized,
@@ -670,6 +1135,8 @@ mod sealed {
                 false => other,
             }
         }
+
+        #[inline(always)]
         fn min(self, other: Self) -> Self
         where
             Self: PartialOrd<Self> + Sized,
@@ -689,14 +1156,6 @@ mod sealed {
         };
     }
     ext!(i64, i32, i16, i8, u64, u32, u16, u8, f64, f32);
-
-    impl<Error: Debug, ConversionError: Debug> From<ConversionError>
-        for ControllerError<Error, ConversionError>
-    {
-        fn from(value: ConversionError) -> Self {
-            Self::ConversionError(value)
-        }
-    }
 }
 use sealed::{CmpExt, Convert};
 
@@ -704,10 +1163,12 @@ impl DoubleSize for i32 {
     type Error = ();
     type Ret = i64;
 
+    #[inline(always)]
     fn double_size(self) -> Self::Ret {
         self.into()
     }
 
+    #[inline(always)]
     fn half_size(value: Self::Ret) -> Result<Self, Self::Error>
     where
         Self: Sized,
@@ -720,10 +1181,12 @@ impl DoubleSize for f32 {
     type Error = Infallible;
     type Ret = f64;
 
+    #[inline(always)]
     fn double_size(self) -> Self::Ret {
         self.into()
     }
 
+    #[inline(always)]
     fn half_size(value: Self::Ret) -> Result<Self, Self::Error>
     where
         Self: Sized,

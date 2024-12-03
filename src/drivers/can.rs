@@ -677,7 +677,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
             .set_rxm_mode(initial_settings.rxm_mode)
             .filter_message_id(
                 RXBN::RXB0,
-                initial_settings.rx0_filtermask.rx_mask,
+                initial_settings.rx0_filtermaskDOUT.rx_mask,
                 initial_settings.rx0_filtermask.acceptance_filter,
             )
             .filter_message_id(
@@ -787,7 +787,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
         let canctrl_settings =
             SettingsCanCtrl::new(OperationTypes::Loopback, false, CLKPRE::DIV1, false, false);
         can_settings.canctrl = canctrl_settings;
-
+DOUT
         self.change_settings(can_settings);
         self.read_status();
         self.load_tx_buffer(TXBN::TXB0, can_msg);
@@ -1364,8 +1364,10 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
                 defmt::println!("TXB0 successfully transmitted a message!");
                 //TODO: Clear the associated CANINTF bit for TXnIE below
                 self.clear_interrupt_flag(2);
+
                 let canintff = self.read_register(MCP2515Register::CANINTF, 0x00).unwrap();
                 defmt::println!("CANINTF register bits after handle: {:08b}", canintff);
+
                 //self.tx_pending(false);
                 let all_handled = self.interrupt_is_cleared();
                 if (!all_handled) {}
@@ -1409,8 +1411,10 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
                 //self.clear_interrupt_flag(0);
                 self.transmit(&frame_response);
                 self.clear_interrupt_flag(0);
+
                 let canintff = self.read_register(MCP2515Register::CANINTF, 0x00).unwrap();
                 defmt::println!("CANINTF register bits after handle: {:08b}", canintff);
+
             }
             InterruptFlagCode::RXB1Interrupt => {
                 defmt::println!("RXB1 received a message!");

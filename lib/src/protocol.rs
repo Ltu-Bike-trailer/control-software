@@ -3,6 +3,7 @@
 //! This is a dead simple protocol a typical message is defined by a
 //! [`Message identifier`](constants::Message) and a single f32.
 pub mod constants;
+pub mod message;
 pub mod sender;
 pub mod message;
 
@@ -71,6 +72,63 @@ pub enum SensorSubSystem {
     AlphaSensor(f32),
     /// The load cell on the bed.
     LoadCellBed(f32),
+    /// The current sensors on the left motor.
+    CurrentSenseLeft(CurrentMeasurement),
+    /// The current sensors on the right motor.
+    CurrentSenseRight(CurrentMeasurement),
+}
+
+#[derive(Clone, PartialEq, Debug)]
+/// A simple wrapper for the current measurements.
+pub struct CurrentMeasurement {
+    // This will wrap but that is fine. As long as we are aware of it.
+    ts: u16,
+    p1: f16,
+    p2: f16,
+    p3: f16,
+}
+
+impl From<(u64, [f32; 3])> for CurrentMeasurement {
+    #[allow(clippy::cast_precision_loss)]
+    fn from(value: (u64, [f32; 3])) -> Self {
+        Self {
+            ts: value.0 as u16,
+            p1: value.1[0] as f16,
+            p2: value.1[1] as f16,
+            p3: value.1[2] as f16,
+        }
+    }
+}
+impl From<CurrentMeasurement> for (u64, [f32; 3]) {
+    fn from(value: CurrentMeasurement) -> Self {
+        //let from_u16 = |val: u16| -> f32 { val as f32 / ((1 << 16 - FLOAT_MAX) as f32
+        // - 1.) };
+        (u64::from(value.ts), [
+            value.p1 as f32,
+            value.p2 as f32,
+            value.p3 as f32,
+        ])
+    }
+}
+
+impl From<CurrentMeasurement> for [u8; 8] {
+    fn from(value: CurrentMeasurement) -> Self {
+        let mut buffer = [0; 8];
+        buffer[0..=1].copy_from_slice(&value.ts.to_le_bytes());
+        buffer[2..=3].copy_from_slice(&value.p1.to_le_bytes());
+        buffer[4..=5].copy_from_slice(&value.p2.to_le_bytes());
+        buffer[6..=7].copy_from_slice(&value.p3.to_le_bytes());
+        buffer
+    }
+}
+impl From<[u8; 8]> for CurrentMeasurement {
+    fn from(value: [u8; 8]) -> Self {
+        let ts: u16 = u16::from_le_bytes([value[0], value[1]]);
+        let p1: f16 = f16::from_le_bytes([value[2], value[3]]);
+        let p2: f16 = f16::from_le_bytes([value[4], value[5]]);
+        let p3: f16 = f16::from_le_bytes([value[6], value[7]]);
+        Self { ts, p1, p2, p3 }
+    }
 }
 
 /// Denotes the motors connected to the cart and their target velocities.
@@ -125,9 +183,8 @@ impl TryFrom<&CanMessage> for WriteType {
         Ok(match value.id() {
             Id::Standard(id) => match constants::Message::try_from(id)? {
                 LeftMotor | RightMotor => Self::Motor(MotorSubSystem::try_from(value)?),
-                SensorAlpha | SensorTheta | SensorLBed | SensorLFront => {
-                    Self::Sensor(SensorSubSystem::try_from(value)?)
-                }
+                SensorAlpha | SensorTheta | SensorLBed | SensorLFront | SensorCurrentLeft
+                | SensorCurrentRight => Self::Sensor(SensorSubSystem::try_from(value)?),
                 _ => return Err(ParsingError::IncorrectId),
             },
             Id::Extended(_) => return Err(ParsingError::IncorrectId),
@@ -205,6 +262,13 @@ impl Into<CanMessage> for SensorSubSystem {
             Self::LoadCellBed(val) => {
                 CanMessage::new(SensorLBed, &val.to_le_bytes()).expect("Invalid parser")
             }
+            Self::CurrentSenseLeft(mes) => {
+                CanMessage::new(SensorCurrentLeft, &(<[u8; 8]>::from(mes))).expect("Invalid parser")
+            }
+            Self::CurrentSenseRight(mes) => {
+                CanMessage::new(SensorCurrentRight, &(<[u8; 8]>::from(mes)))
+                    .expect("Invalid parser")
+            }
         }
     }
 }
@@ -219,6 +283,20 @@ impl TryFrom<&CanMessage> for SensorSubSystem {
                 SensorTheta => 1,
                 SensorLBed => 2,
                 SensorLFront => 3,
+                SensorCurrentLeft => {
+                    if value.dlc != 8 {
+                        return Err(ParsingError::InsufficientBytes);
+                    }
+                    return Ok(Self::CurrentSenseLeft(CurrentMeasurement::from(value.data)));
+                }
+                SensorCurrentRight => {
+                    if value.dlc != 8 {
+                        return Err(ParsingError::InsufficientBytes);
+                    }
+                    return Ok(Self::CurrentSenseRight(CurrentMeasurement::from(
+                        value.data,
+                    )));
+                }
                 _ => return Err(ParsingError::IncorrectId),
             },
             Id::Extended(_) => return Err(ParsingError::IncorrectId),
@@ -329,7 +407,8 @@ impl TryFrom<&CanMessage> for MessageType {
     fn try_from(value: &CanMessage) -> Result<Self, Self::Error> {
         Ok(match value.id() {
             Id::Standard(id) => match id.try_into()? {
-                LeftMotor | RightMotor | SensorAlpha | SensorTheta | SensorLBed | SensorLFront => {
+                LeftMotor | RightMotor | SensorAlpha | SensorTheta | SensorLBed | SensorLFront
+                | SensorCurrentLeft | SensorCurrentRight => {
                     Self::Write(WriteType::try_from(value)?)
                 }
                 MotorDiagLeft | MotorDiagRight | BatteryDiag => {
@@ -427,6 +506,7 @@ mod test {
     use embedded_can::Frame;
 
     use super::{
+        message::CanMessage,
         sender::Sender,
         BatteryStatus,
         FixedLogType,
@@ -448,6 +528,12 @@ mod test {
             MessageType::Write(WriteType::Sensor(SensorSubSystem::ThetaSensor(10.))),
             MessageType::Write(WriteType::Sensor(SensorSubSystem::LoadCellBed(10.))),
             MessageType::Write(WriteType::Sensor(SensorSubSystem::LoadCellFront(10.))),
+            MessageType::Write(WriteType::Sensor(SensorSubSystem::CurrentSenseLeft(
+                super::CurrentMeasurement::from((10, [10., 0., 9.])),
+            ))),
+            MessageType::Write(WriteType::Sensor(SensorSubSystem::CurrentSenseRight(
+                super::CurrentMeasurement::from((10, [10., 0., 9.])),
+            ))),
             MessageType::FixedLog(FixedLogType::BatteryStatus(BatteryStatus(129.))),
             MessageType::FixedLog(FixedLogType::Velocity(VelocityInfo(MotorSubSystem::Left(
                 129.,
@@ -458,8 +544,12 @@ mod test {
         ];
 
         for msg in to_test {
+            println!("Testing {:?}", msg);
             let serialized: CanMessage = msg.clone().into();
-            println!("ID : {:?}", serialized.id);
+            println!(
+                "ID : {:?}, data : {:?} {}",
+                serialized.id, serialized.data, serialized.dlc
+            );
             let de: MessageType = MessageType::try_from(&serialized).unwrap();
             println!("Expected {:?} got {:?}", msg, de);
             assert!(msg == de);
