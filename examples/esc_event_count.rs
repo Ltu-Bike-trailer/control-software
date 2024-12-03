@@ -167,7 +167,7 @@ mod app {
     ///
     /// ## Motor driving
     ///
-    /// This function also drives the motors. This is the defualt case. The only
+    /// This function also drives the motors. This is the default case. The only
     /// other time that the motor should be driven externally is if the PID
     /// controller requests a new velocity.
     ///
@@ -223,7 +223,7 @@ mod app {
     ///
     /// This function should only be called by the PID controller.
     ///
-    /// This ensures that the velocity can be set without dependance on the rate
+    /// This ensures that the velocity can be set without dependence on the rate
     /// of interrupts.
     async fn motor_driver(mut cx: motor_driver::Context) {
         let (phase1, phase2, phase3) = (cx.local.phase1, cx.local.phase2, cx.local.phase3);
