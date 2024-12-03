@@ -442,8 +442,8 @@ impl Message<CanMessage> for MessageType {}
 //        })
 //    }
 //
-//    fn new_remote(_id: impl Into<embedded_can::Id>, _dlc: usize) -> Option<Self> {
-//        None
+//    fn new_remote(_id: impl Into<embedded_can::Id>, _dlc: usize) ->
+// Option<Self> {        None
 //    }
 //
 //    fn is_extended(&self) -> bool {

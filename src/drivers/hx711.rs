@@ -82,22 +82,21 @@ enum DataTiming {
     T4(u64),
 }
 
-/// Error type, for whenever, you try to create `DataTiming` 
-/// instances that are not within acceptable range 
+/// Error type, for whenever, you try to create `DataTiming`
+/// instances that are not within acceptable range
 #[derive(Debug, Clone, Copy)]
 pub struct DataTimingInvalidRange;
 
-/// A tuple struct containing valid `DataTiming` values. 
+/// A tuple struct containing valid `DataTiming` values.
 #[derive(Debug, Clone, Copy)]
 pub struct ValidTimings(DataTiming, DataTiming, DataTiming, DataTiming);
 
 impl<const NOM: u32, const DENOM: u32> From<DataTiming> for Duration<u64, NOM, DENOM> {
-
     #[allow(clippy::match_same_arms)]
     fn from(val: DataTiming) -> Self {
         match val {
-            DataTiming::T1(t1) => t1.nanos(), 
-            DataTiming::T2(t2) => t2.nanos(),  
+            DataTiming::T1(t1) => t1.nanos(),
+            DataTiming::T2(t2) => t2.nanos(),
             DataTiming::T3(t3) => t3.nanos(),
             DataTiming::T4(t4) => t4.nanos(),
         }
@@ -105,7 +104,7 @@ impl<const NOM: u32, const DENOM: u32> From<DataTiming> for Duration<u64, NOM, D
 }
 
 impl DataTiming {
-    pub const T3_MAX: u64 = 50000; 
+    pub const T3_MAX: u64 = 50000;
 
     fn valid_timing(&self) -> bool {
         match self {
@@ -116,25 +115,29 @@ impl DataTiming {
         }
     }
 
-    fn get_valid_timings(timings: [Self; 4]) -> Result<ValidTimings, DataTimingInvalidRange>{
-        for t in &timings{
-            if !t.valid_timing(){
+    fn get_valid_timings(timings: [Self; 4]) -> Result<ValidTimings, DataTimingInvalidRange> {
+        for t in &timings {
+            if !t.valid_timing() {
                 return Err(DataTimingInvalidRange);
             }
         }
         Ok(ValidTimings(timings[0], timings[1], timings[2], timings[3]))
     }
-
 }
 
 impl Default for ValidTimings {
     fn default() -> Self {
-        Self(DataTiming::T1(100), DataTiming::T2(10), DataTiming::T3(300), DataTiming::T4(300))
+        Self(
+            DataTiming::T1(100),
+            DataTiming::T2(10),
+            DataTiming::T3(300),
+            DataTiming::T4(300),
+        )
     }
 }
 
 impl ValidTimings {
-    /// Creates a new tuple struct containing checked duration values. 
+    /// Creates a new tuple struct containing checked duration values.
     /// That's within the acceptable range.
     /// Returns `Self::default()` if any of the provided timings are invalid.
     #[must_use]
@@ -169,8 +172,12 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
     pub const CALIBRATION_CONST: i32 = 3_065_448_i32;
 
     /// Initialize and creates a new HX711 driver instance.
-    pub const fn init(sck: PINOUT, digital_out: PININ, gain_amount: Gain, timings: ValidTimings) -> Self {
-        
+    pub const fn init(
+        sck: PINOUT,
+        digital_out: PININ,
+        gain_amount: Gain,
+        timings: ValidTimings,
+    ) -> Self {
         Self {
             pd_sck: sck,
             dout: digital_out,
@@ -180,7 +187,6 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
             data_timings: timings,
         }
     }
-
 
     /// When DOUT is low, data is ready for reception.
     /// It starts with the MSB and ends with LSB.
@@ -195,7 +201,7 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
         T: Monotonic<Duration = rtic_monotonics::fugit::Duration<u64, NOM, DENOM>> + Send,
     {
         let ValidTimings(t1, t2, t3, t4) = self.data_timings;
-        
+
         let mut read_done = false;
         self.pd_sck.set_high();
 

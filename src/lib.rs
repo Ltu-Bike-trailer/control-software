@@ -13,7 +13,6 @@
     rust_2018_idioms,
     rust_2024_compatibility
 )]
-
 #![allow(
     clippy::manual_range_contains,
     clippy::single_match_else,
