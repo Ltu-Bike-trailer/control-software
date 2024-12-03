@@ -1,6 +1,10 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 #TODO: Replace this with propper target.
+
+#runner = "arm-none-eabi-gdb -q -x openocd.gdb"
+#runner = "cargo flash --chip nrf52840_xxAA"
 runner = "probe-rs run --allow-erase-all --chip nrf52840_xxAA"
+
 rustflags = [
     "-Zlocation-detail=none",
     "-Zfmt-debug=none",
