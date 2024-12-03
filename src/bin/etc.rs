@@ -229,7 +229,7 @@ mod etc {
     ///
     /// These interrupts can be
     /// - Hal effect
-    /// - Can buss
+    /// - Can bus
     ///
     /// ## Hal effect
     ///
@@ -238,7 +238,7 @@ mod etc {
     /// the shared variables. Moreover, it gets the latest pattern and updates
     /// the shared pattern.
     ///
-    /// ## Can buss
+    /// ## Can bus
     ///
     /// TODO
     fn handle_gpio(mut cx: handle_gpio::Context) {
@@ -455,7 +455,7 @@ mod etc {
             prev: f32 = 0.,
             // Integral component accumulator.
             integral: f32 = 0.,
-            // Counter for wether or not the cart control system should be allowed to run.
+            // Counter for whether or not the cart control system should be allowed to run.
             started:u32 = 0
         ],
         shared = [

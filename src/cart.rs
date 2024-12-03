@@ -3,10 +3,10 @@
 /// Defines some constants for the cart.
 pub mod constants {
 
-    /// The angle inbetween each of the HAL effect sensors.
+    /// The angle in between each of the HAL effect sensors.
     pub const PHASE_SHIFT_HAL: f32 = core::f32::consts::PI / 3.;
 
-    /// The diamater of the wheel.
+    /// The diameter of the wheel.
     pub const WHEEL_DIAMETER: f32 = 0.55;
 
     /// Sample current every millisecond.
