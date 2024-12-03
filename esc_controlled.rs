@@ -147,7 +147,7 @@ mod app {
     ///
     /// ## Motor driving
     ///
-    /// This function also drives the motors. This is the defualt case. The only
+    /// This function also drives the motors. This is the default case. The only
     /// other time that the motor should be driven externally is if the PID
     /// controller requests a new velocity.
     ///
@@ -261,7 +261,7 @@ mod app {
     #[task(shared = [current_target,duty], local = [current_sense_rec],priority = 1)]
     /// Does the PID computations needed for current regulation.
     async fn control_loop(mut cx: control_loop::Context) {
-        defmt::info!("Controll loop entered");
+        defmt::info!("Control loop entered");
         let mut controller = MotorPid::new(0.0);
 
         let mut prev = 0;
