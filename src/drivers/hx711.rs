@@ -109,15 +109,15 @@ impl DataTiming {
 
     fn valid_timing(&self) -> bool {
         match self {
-            DataTiming::T1(val) => *val >= 100,
-            DataTiming::T2(val) => *val <= 100,
-            DataTiming::T3(val) => (200..=Self::T3_MAX).contains(val),
-            DataTiming::T4(val) => *val >= 200,
+            Self::T1(val) => *val >= 100,
+            Self::T2(val) => *val <= 100,
+            Self::T3(val) => (200..=Self::T3_MAX).contains(val),
+            Self::T4(val) => *val >= 200,
         }
     }
 
-    fn get_valid_timings(timings: [DataTiming; 4]) -> Result<ValidTimings, DataTimingInvalidRange>{
-        for t in timings.iter(){
+    fn get_valid_timings(timings: [Self; 4]) -> Result<ValidTimings, DataTimingInvalidRange>{
+        for t in &timings{
             if !t.valid_timing(){
                 return Err(DataTimingInvalidRange);
             }
@@ -135,7 +135,9 @@ impl Default for ValidTimings {
 
 impl ValidTimings {
     /// Creates a new tuple struct containing checked duration values. 
-    /// That's within the acceptable range. 
+    /// That's within the acceptable range.
+    /// Returns `Self::default()` if any of the provided timings are invalid.
+    #[must_use]
     pub fn new(t1: u64, t2: u64, t3: u64, t4: u64) -> Self {
         let timings: [DataTiming; 4] = [
             DataTiming::T1(t1),
@@ -143,8 +145,7 @@ impl ValidTimings {
             DataTiming::T3(t3),
             DataTiming::T4(t4),
         ];
-        let checked_timings = DataTiming::get_valid_timings(timings).unwrap();
-        checked_timings
+        DataTiming::get_valid_timings(timings).unwrap_or_else(|_| Self::default())
     }
 }
 
@@ -168,7 +169,7 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
     pub const CALIBRATION_CONST: i32 = 3_065_448_i32;
 
     /// Initialize and creates a new HX711 driver instance.
-    pub fn init(sck: PINOUT, digital_out: PININ, gain_amount: Gain, timings: ValidTimings) -> Self {
+    pub const fn init(sck: PINOUT, digital_out: PININ, gain_amount: Gain, timings: ValidTimings) -> Self {
         
         Self {
             pd_sck: sck,
