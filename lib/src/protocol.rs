@@ -5,7 +5,6 @@
 pub mod constants;
 pub mod message;
 pub mod sender;
-pub mod message;
 
 #[allow(clippy::enum_glob_use)]
 use constants::{InvalidMessageId, Message::*};
@@ -515,7 +514,6 @@ mod test {
         SensorSubSystem,
         VelocityInfo,
         WriteType,
-        message::CanMessage
     };
     //use crate::protocol::CanMessage;
 

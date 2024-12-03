@@ -50,7 +50,7 @@
 #![cfg_attr(not(feature = "std"), no_std, allow(internal_features))]
 pub mod constants;
 // Remove these for now. They are unused and will likely continue to be unused.
-//pub mod gain_scheduled;
-//pub mod pid;
+pub mod gain_scheduled;
+pub mod pid;
 pub mod protocol;
 pub mod wrapper;
