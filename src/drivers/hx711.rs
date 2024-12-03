@@ -9,7 +9,7 @@
 #![allow(missing_docs)]
 #![feature(generic_arg_infer)]
 #![allow(clippy::future_not_send)]
-use core::future::Future;
+use core::{future::Future, ops::RangeBounds};
 
 use cortex_m::asm as _;
 use cortex_m_rt::entry;
@@ -37,6 +37,8 @@ pub struct Hx711Driver<PINOUT: OutputPin + Send, PININ: InputPin + Send> {
     bit_index: u8,
     /// Applied gain-value for next conversion period.
     gain: Gain,
+    /// Helper tuple struct for checking and getting valid timings.
+    data_timings: ValidTimings,
 }
 
 #[derive(Debug)]
@@ -68,26 +70,81 @@ pub enum Gain {
 /// T2: `PD_SCK` rising edge to DOUT data ready.
 /// T3: `PD_SCK` high time.
 /// T4: `PD_SCK` low time.
+#[derive(Debug, Clone, Copy)]
 enum DataTiming {
-    /// MIN 0.1 µs .
-    T1,
-    /// MAX 0.1 µs.
-    T2,
-    /// MIN 0.2 µs and MAX 50 µs.
-    T3,
-    /// MIN 0.2 µs.   
-    T4,
+    /// T1: MIN 0.1 µs (100 ns).
+    T1(u64),
+    /// T2: MAX 0.1 µs (100 ns).
+    T2(u64),
+    /// T3: MIN 0.2 µs (200 ns) and MAX 50 µs.
+    T3(u64),
+    /// T4: MIN 0.2 µs (200 ns).   
+    T4(u64),
 }
 
+/// Error type, for whenever, you try to create `DataTiming` 
+/// instances that are not within acceptable range 
+#[derive(Debug, Clone, Copy)]
+pub struct DataTimingInvalidRange;
+
+/// A tuple struct containing valid `DataTiming` values. 
+#[derive(Debug, Clone, Copy)]
+pub struct ValidTimings(DataTiming, DataTiming, DataTiming, DataTiming);
+
 impl<const NOM: u32, const DENOM: u32> From<DataTiming> for Duration<u64, NOM, DENOM> {
+
     #[allow(clippy::match_same_arms)]
     fn from(val: DataTiming) -> Self {
         match val {
-            DataTiming::T1 => 100.nanos(), // 0.1 µs
-            DataTiming::T2 => 10.nanos(),  // 0.01 µs
-            DataTiming::T3 => 300.nanos(), // 0.3 µs
-            DataTiming::T4 => 300.nanos(), // 0.3 µs
+            DataTiming::T1(t1) => t1.nanos(), 
+            DataTiming::T2(t2) => t2.nanos(),  
+            DataTiming::T3(t3) => t3.nanos(),
+            DataTiming::T4(t4) => t4.nanos(),
         }
+    }
+}
+
+impl DataTiming {
+    pub const T3_MAX: u64 = 50000; 
+
+    fn valid_timing(&self) -> bool {
+        match self {
+            DataTiming::T1(val) => *val >= 100,
+            DataTiming::T2(val) => *val <= 100,
+            DataTiming::T3(val) => (200..=Self::T3_MAX).contains(val),
+            DataTiming::T4(val) => *val >= 200,
+        }
+    }
+
+    fn get_valid_timings(timings: [DataTiming; 4]) -> Result<ValidTimings, DataTimingInvalidRange>{
+        for t in timings.iter(){
+            if !t.valid_timing(){
+                return Err(DataTimingInvalidRange);
+            }
+        }
+        Ok(ValidTimings(timings[0], timings[1], timings[2], timings[3]))
+    }
+
+}
+
+impl Default for ValidTimings {
+    fn default() -> Self {
+        Self(DataTiming::T1(100), DataTiming::T2(10), DataTiming::T3(300), DataTiming::T4(300))
+    }
+}
+
+impl ValidTimings {
+    /// Creates a new tuple struct containing checked duration values. 
+    /// That's within the acceptable range. 
+    pub fn new(t1: u64, t2: u64, t3: u64, t4: u64) -> Self {
+        let timings: [DataTiming; 4] = [
+            DataTiming::T1(t1),
+            DataTiming::T2(t2),
+            DataTiming::T3(t3),
+            DataTiming::T4(t4),
+        ];
+        let checked_timings = DataTiming::get_valid_timings(timings).unwrap();
+        checked_timings
     }
 }
 
@@ -111,15 +168,18 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
     pub const CALIBRATION_CONST: i32 = 3_065_448_i32;
 
     /// Initialize and creates a new HX711 driver instance.
-    pub const fn init(sck: PINOUT, digital_out: PININ, gain_amount: Gain) -> Self {
+    pub fn init(sck: PINOUT, digital_out: PININ, gain_amount: Gain, timings: ValidTimings) -> Self {
+        
         Self {
             pd_sck: sck,
             dout: digital_out,
             dout_data: 0i32,
             bit_index: 0,
             gain: gain_amount,
+            data_timings: timings,
         }
     }
+
 
     /// When DOUT is low, data is ready for reception.
     /// It starts with the MSB and ends with LSB.
@@ -133,11 +193,13 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
     where
         T: Monotonic<Duration = rtic_monotonics::fugit::Duration<u64, NOM, DENOM>> + Send,
     {
+        let ValidTimings(t1, t2, t3, t4) = self.data_timings;
+        
         let mut read_done = false;
         self.pd_sck.set_high();
 
         if (self.bit_index < 24) {
-            T::delay(DataTiming::T2.into()).await;
+            T::delay(t2.into()).await;
             let read = i32::from(unsafe { self.dout.is_high().unwrap_unchecked() });
             self.dout_data = (self.dout_data << 1) | read;
         }
@@ -149,9 +211,9 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
         }
         self.bit_index += 1;
 
-        T::delay(DataTiming::T3.into()).await;
+        T::delay(t3.into()).await;
         self.pd_sck.set_low();
-        T::delay(DataTiming::T4.into()).await;
+        T::delay(t4.into()).await;
 
         read_done
     }
@@ -173,8 +235,9 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
     where
         T: Monotonic<Duration = rtic_monotonics::fugit::Duration<u64, NOM, DENOM>> + Send,
     {
+        let ValidTimings(t1, t2, t3, t4) = self.data_timings;
         let stop_count = self.next_conversion_gain(next_gain);
-        T::delay(DataTiming::T1.into()).await;
+        T::delay(t1.into()).await;
         loop {
             // Apply 25~27 positive clock pulses here
             let full_read = self.read_data_pulse::<T, NOM, DENOM>(stop_count).await;

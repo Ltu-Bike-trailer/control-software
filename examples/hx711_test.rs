@@ -94,7 +94,12 @@ mod app {
 
         let mut gpiote = Gpiote::new(device.GPIOTE);
         let mut pwm = Pwm::new(device.PWM0);
-        let mut hx711_instance = Hx711Driver::init(pd_sck, dout_pin, Gain::Apply128);
+
+        let timing_delays = ValidTimings::default();
+        let (t1_val, t2_val, t3_val, t4_val) = (100u64, 10u64, 300u64, 300u64); // Alt.
+        let applied_timing = ValidTimings::new(t1_val, t2_val, t3_val, t4_val); // Alt.
+
+        let mut hx711_instance = Hx711Driver::init(pd_sck, dout_pin, Gain::Apply128, timing_delays);
 
         gpiote
             .channel0()
