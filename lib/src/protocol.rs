@@ -10,9 +10,10 @@ pub mod message;
 use constants::{InvalidMessageId, Message::*};
 use embedded_can::{Frame, Id};
 use message::CanMessage;
+use defmt::Format;
 
 /// Denotes all of the supported message types.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Format)]
 pub enum MessageType {
     /// Writes to a subsystem.
     ///
@@ -28,7 +29,7 @@ pub enum MessageType {
 }
 
 /// Denotes all of the write operations possible with the given system.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Format)]
 pub enum WriteType {
     /// The message relates to a sensor subsystem.
     Sensor(SensorSubSystem),
@@ -37,7 +38,7 @@ pub enum WriteType {
 }
 
 /// Denotes a log for a specific subsystem.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Format)]
 pub enum FixedLogType {
     /// The status of the battery.
     BatteryStatus(BatteryStatus),
@@ -46,21 +47,21 @@ pub enum FixedLogType {
 }
 
 /// The velocity of the given motor.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Format)]
 pub struct VelocityInfo(
     /// The motor sub system the message relates to.
     pub MotorSubSystem,
 );
 
 /// The battery status at the time of logging.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Format)]
 pub struct BatteryStatus(
     /// The voltage over the battery at the time of logging.
     pub f32,
 );
 
 /// Denotes all of our sensor sub systems.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Format)]
 #[non_exhaustive]
 pub enum SensorSubSystem {
     /// Denotes the sensor subsystem for our main control input.
@@ -74,7 +75,7 @@ pub enum SensorSubSystem {
 }
 
 /// Denotes the motors connected to the cart and their target velocities.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Format)]
 pub enum MotorSubSystem {
     /// The target velocity for the left motor.
     Left(f32),

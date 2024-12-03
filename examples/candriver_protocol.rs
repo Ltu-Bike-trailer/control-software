@@ -36,7 +36,7 @@ mod app {
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};
     use embedded_hal::{delay::DelayNs, digital::OutputPin, spi::SpiBus};
-    use lib::{protocol::{constants::*, sender::Sender}};
+    use lib::protocol::{self, constants::*, sender::Sender};
     use nrf52840_hal::{
         gpio::{self, Floating, Input, Level, Output, Pin, Port, PullUp, PushPull},
         gpiote::{Gpiote, GpioteInputPin},
@@ -54,7 +54,7 @@ mod app {
     #[shared]
     struct Shared {
         gpiote: Gpiote,
-        sender: Sender<10>,
+        sender: Sender<20>,
         candriver: Mcp2515Driver<Spi<SPI0>, Pin<Output<PushPull>>, Pin<Input<PullUp>>>,
         
     }
@@ -96,7 +96,7 @@ mod app {
         let cs_pin = port1.p1_02.into_push_pull_output(Level::High).degrade();
         let can_interrupt = port1.p1_15.into_pullup_input().degrade();
 
-        let mut spi = Spi::new(device.SPI0, pins, Frequency::K500, MODE_0);
+        let mut spi = Spi::new(device.SPI0, pins, Frequency::M4, MODE_0);
         let mut gpiote = Gpiote::new(device.GPIOTE);
 
         let dummy_data = "dummy".as_bytes();
@@ -143,8 +143,7 @@ mod app {
         defmt::info!("dummy_data: {:?}", dummy_data.len());
 
         let mut sender = Sender::new();
-        //sender.set_left_motor(1.0).unwrap();
-        
+        sender.set_left_motor(1.0).unwrap();
         //sender.set_theta(value) 
         //let mut msg = sender.dequeue().unwrap();
 
@@ -152,11 +151,9 @@ mod app {
         //msg.print_frame();
         //can_driver.transmit(&msg);
         
-
         send_updates::spawn().unwrap();
         fetch_data::spawn().unwrap();
         
-
         //let mut frame =
         //   CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02,
         // 0x03]).unwrap();
@@ -189,18 +186,17 @@ mod app {
                 cx.shared.candriver.lock(|can_driver|{
                     let interrupt_type = can_driver.interrupt_decode().unwrap();
                     if let Some(frame) = can_driver.handle_interrupt(interrupt_type) {
-                        let mut msg_frame = frame;
-                        let std_id = StandardId::new(msg_frame.id_raw()).unwrap();
-                        let recieved_id = Message::try_from(std_id).unwrap();
-
-                        defmt::info!("Received the frame message type: {:?}", recieved_id);
+                        let msg_type = protocol::MessageType::try_from(&frame).unwrap();
+                        defmt::info!("Received the frame message type: {:?}", msg_type);
                         //handle_can::spawn(frame).unwrap();
                         //fetch_data::spawn().unwrap();
                         //can_driver.transmit(&msg_frame);
                     }
+
                     if can_driver.interrupt_is_cleared() {
                         defmt::info!("All CAN interrupt has been handled!");
                         gpiote.channel0().reset_events();
+                        
                     }
                 });
 
@@ -219,42 +215,46 @@ mod app {
     #[task(priority = 1, shared = [candriver, sender])]
     async fn handle_can(mut cx: handle_can::Context, frame: lib::protocol::message::CanMessage){
         let mut msg_frame = frame;
-        let std_id = StandardId::new(msg_frame.id_raw()).unwrap();
-        let recieved_id = Message::try_from(std_id).unwrap();
-
-        defmt::info!("Received the frame message type: {:?}", recieved_id);
+        let msg_type = protocol::MessageType::try_from(&msg_frame).unwrap();
+        defmt::info!("Received the frame message type: {:?}", msg_type);
 
         // This is just for testing and keep sending dummy data.
     }
-    #[task(priority = 4, shared = [sender])]
+    #[task(priority = 3, shared = [sender])]
     async fn fetch_data(mut cx: fetch_data::Context){
         // This is just for testing and keep sending dummy data.
         loop {
-            Mono::delay_ms(&mut Mono, 100);            
             cx.shared.sender.lock(|sender|{
+                //sender.set_right_motor(1.0).unwrap();
+                sender.set_left_motor(1.3).unwrap();
+                sender.set_load_cell_front(1.2).unwrap();
+                sender.set_load_cell_bed(1.1);
                 sender.set_theta(1.2_f32);
-                sender.set_theta(2.4_f32);
+                //sender.set_theta(2.4_f32);
             });
-            Mono::delay(500u32.millis().into()).await;            
+            Mono::delay(400u32.millis().into()).await;            
             
         }
     }
     
-    #[task(priority = 3, shared = [sender, candriver])]
+    #[task(priority = 4, shared = [sender, candriver])]
     /// This should enqueue on the Shared `Sender` whenever a 
     /// sensor reads a new value.
     async fn send_updates(mut cx: send_updates::Context){
         // Loop and dequeue, and transmit on the can bus.
         loop {
             cx.shared.sender.lock(|sender|{
-                if let Some(data) = sender.dequeue(){
+                if let Some(mut data) = sender.dequeue(){
                     // Value was found in buffer [TRANSMIT OVER CAN]:
                     cx.shared.candriver.lock(|can|{
+                        data.print_frame();
                         can.transmit(&data);
                     });
+                    
                 } 
+
             });
-            //Mono::delay(100u32.millis().into()).await;            
+            Mono::delay(100u32.millis().into()).await;            
 
         }
     }

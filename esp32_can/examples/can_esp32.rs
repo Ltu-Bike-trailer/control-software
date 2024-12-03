@@ -60,13 +60,13 @@ fn main() -> anyhow::Result<(), anyhow::Error>{
     //const K125: KiloHertz = 125.kHz();
     let bus_config = Config::new()
         //.baudrate(500u32.kHz().into())
-        .baudrate(3200u32.kHz().into())
+        .baudrate(4.MHz().into())
         .data_mode(MODE_0);
     
     log::info!("Trying to initialize SpiBusDriver!");
     let spi_bus = SpiBusDriver::new(spi_driver, &bus_config)?;
 
-    const CLKEN: bool = true;
+    const CLKEN: bool = false;
     const OSM: bool = false;
     const ABAT: bool = false;
 
@@ -97,45 +97,34 @@ fn main() -> anyhow::Result<(), anyhow::Error>{
     let mut can_driver = Mcp2515Driver::init(spi_bus, cs_pin, can_interrupt, can_settings);
     log::info!("MCP2515 Driver was successfully created!");
 
-
     //Ok(())
     
-    let dummy_id = StandardId::new(0x0).unwrap();
-    let mut frame = CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02,
-        0x03]).unwrap();
-    frame.print_frame();
+    //let dummy_id = StandardId::new(0x0).unwrap();
+    //let mut frame = CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02,
+    //    0x03]).unwrap();
+    //frame.print_frame();
     //let _ = can_driver.transmit(&frame);
 
     loop {
         if can_driver.interrupt_pin.is_low(){
-            log::info!("Interrupt pin is low!");
-        }else {
-            let is_high: bool = can_driver.interrupt_pin.is_high();
-            log::info!("Interrupt pin is high = {:?}", is_high);
-        }
-        //FreeRtos::delay_ms(500);
-        //if can_driver.interrupt_pin.is_low(){
-           let interrupt_type = can_driver.interrupt_decode().unwrap();
-           if let Some(frame) = can_driver.handle_interrupt(interrupt_type) {
+            let interrupt_type = can_driver.interrupt_decode().unwrap();
+            if let Some(frame) = can_driver.handle_interrupt(interrupt_type) {
                // Consume frame here:
-               let mut frme = frame;
-               frme.print_frame();
-               //let _ = can_driver.transmit(&frme);
+               //let _ = can_driver.transmit(&frame);
+                //FreeRtos::delay_ms(200);
+
            }
            if can_driver.interrupt_is_cleared(){
                log::info!("All interrupt is cleared!");
            }else{
-                let interrupt_type = can_driver.interrupt_decode().unwrap();
-                can_driver.handle_interrupt(interrupt_type);
+                //let interrupt_type = can_driver.interrupt_decode().unwrap();
+                //can_driver.handle_interrupt(interrupt_type);
            }
            //can_driver.interrupt_pin.enable_interrupt()?;
 
-        //}else{
-            //FreeRtos::delay_ms(500);
-            
-        //}
+        }else{
             FreeRtos::delay_ms(100);
-    
+        }
     }
 
 
