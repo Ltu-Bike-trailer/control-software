@@ -164,7 +164,7 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
     ///
     /// #NOTE
     ///
-    /// This is just for showcasing, and need implemention for the
+    /// This is just for showcasing, and need implementation for the
     /// `run_calibration` method.
     pub const CALIBRATION_CONST: i32 = 3_065_448_i32;
 
@@ -250,7 +250,7 @@ impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ
         }
     }
 
-    /// Under progess - but should return the decoded data struct.
+    /// Under progress - but should return the decoded data struct.
     pub fn decode_data(&mut self, data_in: i32) -> DataSample {
         // Two's complement logic and apply gain and return data...
         // Can I use i32 directly (two's complement) or do I need to wrap,
