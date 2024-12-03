@@ -5,6 +5,7 @@
 #![feature(type_alias_impl_trait)]
 #![deny(clippy::all)]
 #![deny(warnings)]
+#![allow(warnings, dead_code, unused_variables, unreachable_code)]
 
 use controller as _; // global logger + panicking-behavior + memory layout
 
@@ -17,6 +18,10 @@ use controller as _; // global logger + panicking-behavior + memory layout
 )]
 mod app {
     use core::arch::asm;
+
+    use embedded_hal::digital::OutputPin;
+    use esc::PinConfig;
+    use nrf52840_hal::gpio;
 
     // Shared resources go here
     #[shared]
@@ -31,8 +36,24 @@ mod app {
     }
 
     #[init]
-    fn init(_cx: init::Context) -> (Shared, Local) {
+    fn init(cx: init::Context) -> (Shared, Local) {
         defmt::info!("init");
+        defmt::info!("init");
+        nrf52840_hal::Clocks::new(cx.device.CLOCK)
+            .enable_ext_hfosc()
+            .start_lfclk();
+
+        let p0 = nrf52840_hal::gpio::p0::Parts::new(cx.device.P0);
+        let p1 = nrf52840_hal::gpio::p1::Parts::new(cx.device.P1);
+        let ppi = nrf52840_hal::ppi::Parts::new(cx.device.PPI);
+
+        let pins = PinConfig::new(p0, p1, ppi, cx.device.GPIOTE);
+        let (pins, p1) = pins.configure_p1();
+        let (pins, mut p2) = pins.configure_p2();
+        let (pins, p3) = pins.configure_p3();
+        let (pins, current_sense) = pins.configure_adc(cx.device.SAADC);
+        p2.low_side.set_low().unwrap();
+        p2.high_side.set_high().unwrap();
 
         // TODO setup monotonic if used
         // let sysclk = { /* clock setup + returning sysclk as an u32 */ };
