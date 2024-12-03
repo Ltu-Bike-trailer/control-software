@@ -1414,7 +1414,6 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
 
                 let canintff = self.read_register(MCP2515Register::CANINTF, 0x00).unwrap();
                 defmt::println!("CANINTF register bits after handle: {:08b}", canintff);
-
             }
             InterruptFlagCode::RXB1Interrupt => {
                 defmt::println!("RXB1 received a message!");

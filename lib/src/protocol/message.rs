@@ -6,6 +6,7 @@
 #![allow(unused)]
 
 use core::str;
+
 use embedded_can::{nb::Can, Error, Frame, StandardId};
 
 /// Represent a CAN message.
