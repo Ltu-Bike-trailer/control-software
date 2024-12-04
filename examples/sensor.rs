@@ -107,24 +107,21 @@ mod app {
         loop {
             let angle1_new = driver1.read_angle(spi_angle);
             let angle2_new = driver2.read_angle(spi_angle);
-            
+
             let Δ1 = angle1 - angle1_new;
             let Δ2 = angle2 - angle2_new;
-            
+
             //if Δ is >= treshold
             //if diff small dont update
             if (Δ1 >= 0.01 || 0.01 <= Δ1) && (Δ2 >= 0.01 || 0.01 <= Δ2) {
                 angle1 = angle1_new;
                 angle2 = angle2_new;
-                
+
                 //TODO: SEND UPDATE MESSAGE VIA CAN
-                
             }
 
             //let the processor sleep/do other things
             Mono::delay_ms(&mut Mono, 100);
         }
-
     }
-
 }
