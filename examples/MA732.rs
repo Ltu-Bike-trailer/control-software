@@ -34,9 +34,7 @@ mod app {
 
     // Shared resources go here
     #[shared]
-    struct Shared {
-
-    }
+    struct Shared {}
 
     // Local resources go here
     #[local]
@@ -82,15 +80,7 @@ mod app {
 
         worker::spawn().unwrap();
 
-        (
-            Shared {
-
-            },
-            Local {
-                spim,
-                driver,
-            },
-        )
+        (Shared {}, Local { spim, driver })
     }
 
     #[task(local = [driver,spim],priority=2)]
@@ -115,11 +105,9 @@ mod app {
         );
         defmt::info!("Angle post setting {:?}", driver.read_angle(&mut spim));
 
-
-        loop{
+        loop {
             defmt::info!("Angle {:?}", driver.read_angle(&mut spim));
-            Mono::delay_ms(&mut Mono,500);
+            Mono::delay_ms(&mut Mono, 500);
         }
     }
-
 }

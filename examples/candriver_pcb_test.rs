@@ -43,11 +43,7 @@ mod app {
         spim::*,
         Clocks,
     };
-    use rtic_monotonics::nrf::{
-        self,
-        rtc::*,
-        timer::{fugit::ExtU64, Timer0 as Mono},
-    };
+    use rtic_monotonics::nrf::{self, rtc::*};
 
     #[shared]
     struct Shared {
