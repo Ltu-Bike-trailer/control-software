@@ -20,7 +20,7 @@ use super::{BatteryStatus, CanMessage, MessageType, MotorSubSystem, VelocityInfo
 /// use lib::protocol::{
 ///     MessageType,
 ///     sender::Sender,
-///     message::CanMessage
+///     //message::CanMessage
 /// };
 ///
 /// let mut buffer = Sender::<10>::new();

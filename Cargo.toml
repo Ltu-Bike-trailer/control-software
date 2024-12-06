@@ -35,6 +35,8 @@ arraydeque = { version = "0.5.1", default-features = false }
 embedded-can = "0.4.1"
 nb = "1.1.0"
 
+can_mcp2515 = { git = "https://github.com/wiiggee1/can_mcp2515", branch = "master"}
+
 # cargo build/run
 [profile.dev]
 codegen-units = 1
