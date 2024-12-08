@@ -118,7 +118,6 @@ mod hlc {
         //sender.set_left_motor(1.0).unwrap();
 
         send_updates::spawn().unwrap();
-        fetch_data::spawn().unwrap();
 
         //let mut frame =
         //   CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02,
@@ -140,7 +139,7 @@ mod hlc {
     }
 
     #[task(binds = GPIOTE, shared = [gpiote, sender], local = [candriver, can_sender], priority = 5)]
-    fn can_interrupt(cx: can_interrupt::Context) {
+    fn can_interrupt(mut cx: can_interrupt::Context) {
         let can_interrupt::LocalResources {candriver, ..} = cx.local;
         let handle = cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
@@ -149,12 +148,12 @@ mod hlc {
                 
                 let interrupt_type = candriver.interrupt_decode().unwrap();
                 if let Some(frame) = candriver.handle_interrupt(interrupt_type) {
-                    let mut msg_frame = frame;
-                    let std_id = StandardId::new(msg_frame.id_raw()).unwrap();
+                    //let mut msg_frame = frame;
+                    //let std_id = StandardId::new(msg_frame.id_raw()).unwrap();
                     //let recieved_id = Message::try_from(std_id).unwrap();
-                    cx.local.can_sender.try_send(&frame);
+                    cx.local.can_sender.try_send(frame);
 
-                    defmt::info!("Received the frame message type: {:?}", Debug2Format(&recieved_id));
+                   // defmt::info!("Received the frame message type: {:?}", Debug2Format(&recieved_id));
                 }
                 if candriver.interrupt_is_cleared() {
                     defmt::info!("All CAN interrupt has been handled!");
