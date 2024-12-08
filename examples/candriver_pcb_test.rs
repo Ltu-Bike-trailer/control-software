@@ -3,7 +3,7 @@
 #![allow(unused)]
 
 use controller as _;
-use controller::drivers::can::{Mcp2515Driver, Mcp2515Settings};
+use can_mcp2515::drivers::can::*;
 use cortex_m::asm as _;
 use cortex_m_rt::entry;
 use defmt_rtt as _;
@@ -14,21 +14,10 @@ use rtic::app;
 
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC0])]
 mod app {
-
+        
+    use can_mcp2515::drivers::can::*;
     use controller::{
         boards::*,
-        drivers::can::{
-            AcceptanceFilterMask,
-            Bitrate,
-            Mcp2515Driver,
-            Mcp2515Settings,
-            McpClock,
-            OperationTypes,
-            ReceiveBufferMode,
-            SettingsCanCtrl,
-            CLKPRE,
-            RXBN,
-        },
     };
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};
@@ -46,7 +35,6 @@ mod app {
     use rtic_monotonics::nrf::{
         self,
         rtc::*,
-        timer::{fugit::ExtU64, Timer0 as Mono},
     };
 
     #[shared]
