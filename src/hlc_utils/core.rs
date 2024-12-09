@@ -10,7 +10,8 @@ use nrf52840_hal::{
 
 /// Common functionality related to how to handle sensor input. 
 pub trait SensorHandler {
-
+    /// get periodic input samples 
+    fn get_periodic_input();
 }
 
 /// This would listen for programable switch event, 
@@ -25,6 +26,10 @@ pub trait Canbus {
 
 }
 
-/// This is a time scheduler, for when to send 
-/// control response back on the CAN bus line. 
-pub struct ControlScheduler{}
+/// This represent the Controller, that takes force as input, 
+/// and send torque output to motor as output.
+///
+/// Where: u(k) represent a sample input signal. 
+pub struct Controller{
+}
+

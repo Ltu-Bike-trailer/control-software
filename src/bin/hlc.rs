@@ -17,6 +17,7 @@ mod hlc {
     use can_mcp2515::drivers::{can::*, message::CanMessage};
     use controller::{
         boards::*,
+        hlc_utils::{config::*, core::*, events::*},
     };
     use cortex_m::asm;
     use defmt::Debug2Format;
@@ -55,33 +56,14 @@ mod hlc {
         let device = cx.device;
         let port0 = gpio::p0::Parts::new(device.P0);
         let port1 = gpio::p1::Parts::new(device.P1);
-        let t = nrf52840_hal::pac::Peripherals::take();
+        
         let clk = Clocks::new(device.CLOCK).enable_ext_hfosc().start_lfclk();
         Mono::start(device.RTC0);
-        /* Disable shared peripheral addresses */
-
-        device.SPIM0.enable.write(|w| w.enable().disabled());
-        device.SPIS0.enable.write(|w| w.enable().disabled());
-        device.TWIM0.enable.write(|w| w.enable().disabled());
-        device.TWIS0.enable.write(|w| w.enable().disabled());
-        device.TWI0.enable.write(|w| w.enable().disabled());
-
-        //let pin_mapping = PinMapping::new(port0, port1);
-        //let (pin_map, spi) =pin_mapping.can(device.SPIM1);
 
         defmt::println!("Initialize the SPI instance, and CanDriver");
-        let pins = nrf52840_hal::spi::Pins {
-            sck: Some(port0.p0_05.into_push_pull_output(Level::Low).degrade()),
-            mosi: Some(port0.p0_02.into_push_pull_output(Level::Low).degrade()),
-            miso: Some(port0.p0_28.into_floating_input().degrade()),
-        };
 
-        let cs_pin = port1.p1_02.into_push_pull_output(Level::High).degrade();
-        let can_interrupt = port1.p1_15.into_pullup_input().degrade();
-
-        let mut spi = Spi::new(device.SPI0, pins, Frequency::K125, MODE_0);
-        let mut gpiote = Gpiote::new(device.GPIOTE);
-
+        let mut can_manager = CanManager::new(port0, port1);
+        let (cs_pin, int_pin, spi, gpiote) = can_manager.peripheral_instances(device.SPI0, device.GPIOTE);
 
         const CLKEN: bool = true;
         const OSM: bool = false;
@@ -101,28 +83,10 @@ mod hlc {
         );
 
         let can_settings = Mcp2515Settings::default();
-        let mut can_driver = Mcp2515Driver::init(spi, cs_pin, can_interrupt, can_settings);
-
-        gpiote
-            .channel0()
-            .input_pin(&can_driver.interrupt_pin)
-            .hi_to_lo()
-            .enable_interrupt();
-
+        let mut can_driver = Mcp2515Driver::init(spi, cs_pin, int_pin, can_settings);
+        
         let (send, receive) = make_channel!(CanMessage, 10);
-
-        defmt::println!("After initializing Spi<SPI1>...");
-        let dummy_id = StandardId::new(0x2).unwrap();
-
         let mut sender = Sender::new();
-        //sender.set_left_motor(1.0).unwrap();
-
-        send_updates::spawn().unwrap();
-
-        //let mut frame =
-        //   CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02,
-        // 0x03]).unwrap();
-
 
         (Shared { gpiote, sender }, Local {
             candriver: can_driver, can_sender: send, can_receiver: receive,
