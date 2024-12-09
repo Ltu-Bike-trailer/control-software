@@ -1,6 +1,6 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 #TODO: Replace this with propper target.
-runner = "probe-rs run --allow-erase-all --chip nrf52840_xxAA"
+runner = "probe-rs run --allow-erase-all --chip nrf52840_xxAA --log-format {s:severity}"
 rustflags = [
     "-Zlocation-detail=none",
     "-Zfmt-debug=none",

@@ -111,9 +111,10 @@ mod etc {
     fn init(cx: init::Context) -> (Shared, Local) {
         defmt::info!("init");
         nrf52840_hal::Clocks::new(cx.device.CLOCK)
-            .enable_ext_hfosc()
+            //.enable_ext_hfosc()
             .start_lfclk();
         Mono::start(cx.device.RTC0);
+        defmt::info!("Clocks done :)");
 
         let p0 = nrf52840_hal::gpio::p0::Parts::new(cx.device.P0);
         let p1 = nrf52840_hal::gpio::p1::Parts::new(cx.device.P1);
@@ -123,8 +124,11 @@ mod etc {
         let (pins, p1) = pins.configure_p1();
         let (pins, p2) = pins.configure_p2();
         let (pins, p3) = pins.configure_p3();
+        
+        defmt::info!("Phases done");
         let (pins, current_sense) = pins.configure_adc(cx.device.SAADC);
 
+        defmt::info!("Current config done :)");
         let (pins, (spi, _int_pin, cs)) = pins.configure_spi();
         let can = controller::drivers::can::Mcp2515Driver::init(
             spi,
@@ -140,6 +144,7 @@ mod etc {
                 // All bits have to match 0x0
                 .filter_b1(AcceptanceFilterMask::new(0x7FF, 0)),
         );
+        defmt::info!("CAN initiated :)");
         //current_sense.start_sample();
         let events = pins.complete();
         let hal_pins = [p1.hal_effect, p2.hal_effect, p3.hal_effect];
@@ -168,6 +173,7 @@ mod etc {
         phase1.center_align();
         phase2.center_align();
         phase3.center_align();
+        defmt::info!("PHASES configured and center aligned :)");
 
         //  The order that we should drive the phases.
         let drive_pattern = DrivePattern::new();
@@ -175,6 +181,7 @@ mod etc {
         let sender = protocol::sender::Sender::new();
         debug_assert!(Mono::now().duration_since_epoch().to_micros() != 0);
 
+        defmt::info!("Sender spawned :)");
         // Spawn the tasks.
         let mut timer = nrf52840_hal::timer::Timer::new(cx.device.TIMER3);
         timer.enable_interrupt();
@@ -191,6 +198,8 @@ mod etc {
         let (can_event_sender, can_event_receiver) =
             rtic_sync::make_channel!(Option<CanMessage>, 10);
         let (can_receive_sender, can_receive_receiver) = rtic_sync::make_channel!(CanMessage, 10);
+        
+        defmt::info!("Init done :)");
         (
             Shared {
                 // Initialization of shared resources go here

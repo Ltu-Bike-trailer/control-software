@@ -10,7 +10,7 @@ pub mod constants {
     pub const WHEEL_DIAMETER: f32 = 0.55;
 
     /// Sample current every millisecond.
-    pub const CURRENT_SAMPLE_RATE: u64 = 15_000;
+    pub const CURRENT_SAMPLE_RATE: u64 = 1_000;
 
     /// The maximum pwm duty cycle.
     pub const PWM_MAX: i32 = 32767;
@@ -25,7 +25,7 @@ pub mod constants {
     pub const MOTOR_KD: i32 = 5;
 
     /// Motor sample time in the [`MOTOR_TIMESCALE`] time-frame.
-    pub const MOTOR_TS: u32 = 1_000;
+    pub const MOTOR_TS: u32 = 5_000;
 
     /// Motor time resolution
     pub const MOTOR_TIMESCALE: i32 = 1_000_000;
