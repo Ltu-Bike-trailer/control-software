@@ -2,8 +2,8 @@
 #![no_main]
 #![allow(unused)]
 
-use controller as _;
 use can_mcp2515::drivers::can::*;
+use controller as _;
 use cortex_m::asm as _;
 use cortex_m_rt::entry;
 use defmt_rtt as _;
@@ -14,11 +14,9 @@ use rtic::app;
 
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC0])]
 mod app {
-        
+
     use can_mcp2515::drivers::can::*;
-    use controller::{
-        boards::*,
-    };
+    use controller::boards::*;
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};
     use embedded_hal::{digital::OutputPin, spi::SpiBus};
@@ -32,10 +30,7 @@ mod app {
         spim::*,
         Clocks,
     };
-    use rtic_monotonics::nrf::{
-        self,
-        rtc::*,
-    };
+    use rtic_monotonics::nrf::{self, rtc::*};
 
     #[shared]
     struct Shared {

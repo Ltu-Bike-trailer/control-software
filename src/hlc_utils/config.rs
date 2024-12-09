@@ -2,15 +2,7 @@
 #![deny(warnings, missing_docs)]
 #![allow(unused_imports)]
 
-use nrf52840_hal::{
-    gpio::*,
-    gpiote::*,
-};
+use nrf52840_hal::{gpio::*, gpiote::*};
 
-pub struct CanPins {
-    
-}
-
-
-
-
+/// stuct containing the HLC CAN pins
+pub struct CanPins {}

@@ -2,8 +2,8 @@
 #![no_main]
 #![allow(unused)]
 
-use controller as _;
 use can_mcp2515::drivers::can::*;
+use controller as _;
 use cortex_m::asm as _;
 use cortex_m_rt::entry;
 use defmt_rtt as _;
@@ -18,9 +18,7 @@ nrf_rtc0_monotonic!(Mono);
 mod app {
 
     use can_mcp2515::drivers::can::*;
-    use controller::{
-        boards::*,
-    };
+    use controller::boards::*;
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};
     use embedded_hal::{digital::OutputPin, spi::SpiBus};
@@ -180,7 +178,7 @@ mod app {
     #[task(binds = GPIOTE, shared = [gpiote], local = [candriver, candriver_node, sender])]
     fn can_interrupt(mut cx: can_interrupt::Context) {
         //let can_interrupt::LocalResources {candriver, ..} = cx.local;
-        
+
         cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
                 defmt::println!("\n");
