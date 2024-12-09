@@ -57,7 +57,6 @@ mod etc {
         drivers::can::{AcceptanceFilterMask, CanInte, Mcp2515Driver, Mcp2515Settings},
         RingBuffer,
     };
-    use cortex_m::asm;
     use embedded_can::blocking::Can;
     use esc::{self, events::GpioEvents, PinConfig};
     use lib::protocol::{self, message::CanMessage, MessageType, MotorSubSystem, WriteType};
@@ -87,7 +86,6 @@ mod etc {
         pattern: Pattern,
         angle_acc: f32,
         target_davell: f32,
-        current_sense: esc::CurrentManager,
     }
 
     #[local]
@@ -105,6 +103,7 @@ mod etc {
         can_event_receiver: rtic_sync::channel::Receiver<'static, Option<CanMessage>, 10>,
         can_receive_sender: rtic_sync::channel::Sender<'static, CanMessage, 10>,
         can_receive_receiver: rtic_sync::channel::Receiver<'static, CanMessage, 10>,
+        current_sense: esc::CurrentManager,
     }
 
     #[init]
@@ -114,7 +113,6 @@ mod etc {
             //.enable_ext_hfosc()
             .start_lfclk();
         Mono::start(cx.device.RTC0);
-        defmt::info!("Clocks done :)");
 
         let p0 = nrf52840_hal::gpio::p0::Parts::new(cx.device.P0);
         let p1 = nrf52840_hal::gpio::p1::Parts::new(cx.device.P1);
@@ -124,12 +122,15 @@ mod etc {
         let (pins, p1) = pins.configure_p1();
         let (pins, p2) = pins.configure_p2();
         let (pins, p3) = pins.configure_p3();
-        
-        defmt::info!("Phases done");
         let (pins, current_sense) = pins.configure_adc(cx.device.SAADC);
 
-        defmt::info!("Current config done :)");
         let (pins, (spi, _int_pin, cs)) = pins.configure_spi();
+        macro_rules! trust_me {
+            ($code:stmt) => {
+                unsafe { $code }
+            };
+        }
+        let spi2: Spi<SPI0> = trust_me!((0x0 as *mut Spi<SPI0>).read());
         let can = controller::drivers::can::Mcp2515Driver::init(
             spi,
             cs,
@@ -144,7 +145,6 @@ mod etc {
                 // All bits have to match 0x0
                 .filter_b1(AcceptanceFilterMask::new(0x7FF, 0)),
         );
-        defmt::info!("CAN initiated :)");
         //current_sense.start_sample();
         let events = pins.complete();
         let hal_pins = [p1.hal_effect, p2.hal_effect, p3.hal_effect];
@@ -173,7 +173,6 @@ mod etc {
         phase1.center_align();
         phase2.center_align();
         phase3.center_align();
-        defmt::info!("PHASES configured and center aligned :)");
 
         //  The order that we should drive the phases.
         let drive_pattern = DrivePattern::new();
@@ -181,7 +180,6 @@ mod etc {
         let sender = protocol::sender::Sender::new();
         debug_assert!(Mono::now().duration_since_epoch().to_micros() != 0);
 
-        defmt::info!("Sender spawned :)");
         // Spawn the tasks.
         let mut timer = nrf52840_hal::timer::Timer::new(cx.device.TIMER3);
         timer.enable_interrupt();
@@ -198,8 +196,6 @@ mod etc {
         let (can_event_sender, can_event_receiver) =
             rtic_sync::make_channel!(Option<CanMessage>, 10);
         let (can_receive_sender, can_receive_receiver) = rtic_sync::make_channel!(CanMessage, 10);
-        
-        defmt::info!("Init done :)");
         (
             Shared {
                 // Initialization of shared resources go here
@@ -212,7 +208,6 @@ mod etc {
                 pattern: Default::default(),
                 angle_acc: 0.,
                 target_davell: 0.3,
-                current_sense,
             },
             Local {
                 // Initialization of local resources go here
@@ -229,6 +224,7 @@ mod etc {
                 can_event_sender,
                 can_receive_sender,
                 can_receive_receiver,
+                current_sense,
             },
         )
     }
@@ -272,7 +268,7 @@ mod etc {
     ///
     /// These interrupts can be
     /// - Hal effect
-    /// - Can bus
+    /// - Can buss
     ///
     /// ## Hal effect
     ///
@@ -281,7 +277,7 @@ mod etc {
     /// the shared variables. Moreover, it gets the latest pattern and updates
     /// the shared pattern.
     ///
-    /// ## Can bus
+    /// ## Can buss
     ///
     /// TODO
     fn handle_gpio(mut cx: handle_gpio::Context) {
@@ -342,17 +338,17 @@ mod etc {
                 let event_code = match cx.local.can.interrupt_decode() {
                     Ok(code) => code,
                     // We do not have time for recovery here
-                    Err(_) => break,
+                    Err(_) => continue,
                 };
                 if let Some(message) = cx.local.can.handle_interrupt(event_code) {
                     let de: MessageType = match MessageType::try_from(&message) {
                         Ok(val) => val,
-                        Err(_) => break,
+                        Err(_) => continue,
                     };
                     let reference = match de {
                         MessageType::Write(WriteType::Motor(MotorSubSystem::Left(msg))) => msg,
                         MessageType::Write(WriteType::Motor(MotorSubSystem::Right(msg))) => msg,
-                        _ => break,
+                        _ => continue,
                     };
                     cx.shared.duty.lock(|duty| *duty = reference);
                 }
@@ -364,8 +360,19 @@ mod etc {
             let _ = cx.local.can.transmit(&message);
         }
     }
-
+    const fn field_extract<const N: usize, const VAL: usize>() -> usize {
+        let mut ret = 0;
+        let intermediate = VAL >> N * 2;
+        if intermediate & 0b11 == 0b11 {
+            return 0;
+        }
+        ret |= (intermediate & 0b1) << 1;
+        let intermediate = intermediate >> 1;
+        ret |= intermediate & 0b1;
+        ret
+    }
     #[task(local = [phase1,phase2,phase3],shared = [duty,pattern],priority = 2)]
+    #[inline(never)]
     /// Drives the phases of the motor.
     ///
     /// This is done by disabling the high/low side of each phase with respect
@@ -374,7 +381,7 @@ mod etc {
         // Initiate the state variables.
         let (phase1, phase2, phase3) = (cx.local.phase1, cx.local.phase2, cx.local.phase3);
         let mut duty = 0.;
-        let ((mut p1h, mut p1l), (mut p2h, mut p2l), (mut p3h, mut p3l));
+        //let mut drive_pattern;
         let (mut shared_duty, mut pattern) = (cx.shared.duty, cx.shared.pattern);
         let mut old_pattern = Pattern::default();
         loop {
@@ -389,120 +396,114 @@ mod etc {
                 // likely locked due to the orientation of the magnetic fields
                 // we have nothing else to do aside from dropping the voltages to zero.
                 if Mono::now() - entry > 100u64.millis::<1, 16_000_000>() {
-                    ((p1h, p1l), (p2h, p2l), (p3h, p3l)) = Default::default();
                     pattern.lock(|w| *w = Default::default());
                     break;
                 }
 
                 // Check if we got a new control signal.
-                let (pattern, shared_duty) =
+                let (new_pattern, shared_duty) =
                     (&mut pattern, &mut shared_duty).lock(|w, duty| (*w, *duty));
 
                 // If we got a new control signal or if the motor shifted positions apply the
                 // control signals again in the new pattern.
-                if old_pattern != pattern || shared_duty != duty {
-                    ((p1h, p1l), (p2h, p2l), (p3h, p3l)) = pattern.get(shared_duty);
+                if old_pattern != new_pattern || shared_duty != duty {
+                    //drive_pattern = new_pattern.get_u8(shared_duty);
                     duty = shared_duty;
-                    old_pattern = pattern;
+                    old_pattern = new_pattern;
                     break;
                 }
                 // NOTE: This could likely be removed, increasing current consumption slightly
                 // but improving the performance of the etc.
                 Mono::delay(50u64.micros()).await;
             }
+            /*defmt::info!(
+                "Motor driver, duty : {:?}, pattern: {:?}",
+                duty,
+                drive_pattern
+            );*/
+            let ((p1h, p1l), (p2h, p2l), (p3h, p3l)) = old_pattern.get(duty);
+            // Apply the switching pattern.
+            //
+            // If any of the phases tries to kill the system we simply return early.
+            'apply: {
+                match (p1h, p1l) {
+                    (true, false) => {
+                        phase1.disable_channel(pwm::Channel::C1);
 
-            #[no_mangle]
-            #[inline(never)]
-            fn apply(
-                ((p1h, p1l), (p2h, p2l), (p3h, p3l)): ((bool, bool), (bool, bool), (bool, bool)),
-                phase1: &mut Pwm<PWM0>,
-                phase2: &mut Pwm<PWM1>,
-                phase3: &mut Pwm<PWM2>,
-            ) {
-                // Apply the switching pattern.
-                //
-                // If any of the phases tries to kill the system we simply return early.
-                'apply: {
-                    match (p1h, p1l) {
-                        (true, false) => {
-                            phase1.disable_channel(pwm::Channel::C1);
-                            asm::nop();
-                            phase1.enable_channel(pwm::Channel::C0);
-                        }
-                        (false, true) => {
-                            phase1.disable_channel(pwm::Channel::C0);
-                            asm::nop();
-                            phase1.enable_channel(pwm::Channel::C1);
-                        }
-                        (false, false) => {
-                            phase1.disable_channel(pwm::Channel::C0);
-                            asm::nop();
-                            phase1.disable_channel(pwm::Channel::C1);
-                        }
-                        _ => {
-                            phase1.disable_channel(pwm::Channel::C0);
-                            phase1.disable_channel(pwm::Channel::C1);
-                            phase2.disable_channel(pwm::Channel::C0);
-                            phase2.disable_channel(pwm::Channel::C1);
-                            phase3.disable_channel(pwm::Channel::C0);
-                            phase3.disable_channel(pwm::Channel::C1);
-                            break 'apply;
-                        }
-                    };
+                        phase1.enable_channel(pwm::Channel::C0);
+                    }
+                    (false, true) => {
+                        phase1.disable_channel(pwm::Channel::C0);
 
-                    match (p2h, p2l) {
-                        (true, false) => {
-                            phase2.disable_channel(pwm::Channel::C1);
-                            asm::nop();
-                            phase2.enable_channel(pwm::Channel::C0);
-                        }
-                        (false, true) => {
-                            phase2.disable_channel(pwm::Channel::C0);
-                            asm::nop();
-                            phase2.enable_channel(pwm::Channel::C1);
-                        }
-                        (false, false) => {
-                            phase2.disable_channel(pwm::Channel::C0);
-                            asm::nop();
-                            phase2.disable_channel(pwm::Channel::C1);
-                        }
-                        _ => {
-                            phase1.disable_channel(pwm::Channel::C0);
-                            phase1.disable_channel(pwm::Channel::C1);
-                            phase2.disable_channel(pwm::Channel::C0);
-                            phase2.disable_channel(pwm::Channel::C1);
-                            phase3.disable_channel(pwm::Channel::C0);
-                            phase3.disable_channel(pwm::Channel::C1);
-                            break 'apply;
-                        }
-                    };
+                        phase1.enable_channel(pwm::Channel::C1);
+                    }
+                    (false, false) => {
+                        phase1.disable_channel(pwm::Channel::C0);
 
-                    match (p3h, p3l) {
-                        (true, false) => {
-                            phase3.disable_channel(pwm::Channel::C1);
-                            phase3.enable_channel(pwm::Channel::C0);
-                        }
-                        (false, true) => {
-                            phase3.disable_channel(pwm::Channel::C0);
-                            phase3.enable_channel(pwm::Channel::C1);
-                        }
-                        (false, false) => {
-                            phase3.disable_channel(pwm::Channel::C0);
-                            phase3.disable_channel(pwm::Channel::C1);
-                        }
-                        _ => {
-                            phase1.disable_channel(pwm::Channel::C0);
-                            phase1.disable_channel(pwm::Channel::C1);
-                            phase2.disable_channel(pwm::Channel::C0);
-                            phase2.disable_channel(pwm::Channel::C1);
-                            phase3.disable_channel(pwm::Channel::C0);
-                            phase3.disable_channel(pwm::Channel::C1);
-                            break 'apply;
-                        }
-                    };
-                }
+                        phase1.disable_channel(pwm::Channel::C1);
+                    }
+                    _ => {
+                        phase1.disable_channel(pwm::Channel::C0);
+                        phase1.disable_channel(pwm::Channel::C1);
+                        phase2.disable_channel(pwm::Channel::C0);
+                        phase2.disable_channel(pwm::Channel::C1);
+                        phase3.disable_channel(pwm::Channel::C0);
+                        phase3.disable_channel(pwm::Channel::C1);
+                        break 'apply;
+                    }
+                };
+
+                match (p2h, p2l) {
+                    (true, false) => {
+                        phase2.disable_channel(pwm::Channel::C1);
+
+                        phase2.enable_channel(pwm::Channel::C0);
+                    }
+                    (false, true) => {
+                        phase2.disable_channel(pwm::Channel::C0);
+
+                        phase2.enable_channel(pwm::Channel::C1);
+                    }
+                    (false, false) => {
+                        phase2.disable_channel(pwm::Channel::C0);
+
+                        phase2.disable_channel(pwm::Channel::C1);
+                    }
+                    _ => {
+                        phase1.disable_channel(pwm::Channel::C0);
+                        phase1.disable_channel(pwm::Channel::C1);
+                        phase2.disable_channel(pwm::Channel::C0);
+                        phase2.disable_channel(pwm::Channel::C1);
+                        phase3.disable_channel(pwm::Channel::C0);
+                        phase3.disable_channel(pwm::Channel::C1);
+                        break 'apply;
+                    }
+                };
+
+                match (p3h, p3l) {
+                    (true, false) => {
+                        phase3.disable_channel(pwm::Channel::C1);
+                        phase3.enable_channel(pwm::Channel::C0);
+                    }
+                    (false, true) => {
+                        phase3.disable_channel(pwm::Channel::C0);
+                        phase3.enable_channel(pwm::Channel::C1);
+                    }
+                    (false, false) => {
+                        phase3.disable_channel(pwm::Channel::C0);
+                        phase3.disable_channel(pwm::Channel::C1);
+                    }
+                    _ => {
+                        phase1.disable_channel(pwm::Channel::C0);
+                        phase1.disable_channel(pwm::Channel::C1);
+                        phase2.disable_channel(pwm::Channel::C0);
+                        phase2.disable_channel(pwm::Channel::C1);
+                        phase3.disable_channel(pwm::Channel::C0);
+                        phase3.disable_channel(pwm::Channel::C1);
+                        break 'apply;
+                    }
+                };
             }
-            apply(((p1h, p1l), (p2h, p2l), (p3h, p3l)), phase1, phase2, phase3);
             // This is a bit faster.
             // The sign of the f32 is only relevant when we are setting the direction to
             // rotate, not while setting the duty cycles of the mosfets.
@@ -514,6 +515,7 @@ mod etc {
             phase1.set_duty(duty);
             phase2.set_duty(duty);
             phase3.set_duty(duty);
+            //defmt::info!("Motor Driver {:?}",duty);
         }
     }
 
@@ -545,8 +547,11 @@ mod etc {
             prev: f32 = 0.,
             // Integral component accumulator.
             integral: f32 = 0.,
-            // Counter for whether or not the cart control system should be allowed to run.
-            started:u32 = 0
+            // Counter for wether or not the cart control system should be allowed to run.
+            started:u32 = 0,
+            // The previous current
+            current:f32 = 0.,
+            current_sense
         ],
         shared = [
             // The target duty cycle.
@@ -559,7 +564,7 @@ mod etc {
             // Current angular acceleration. This allows for non intrusive logging.
             angle_acc,
             // The target gradient in angular velocity.
-            target_davell
+            target_davell,
         ],
         priority = 4,
     )]
@@ -583,85 +588,36 @@ mod etc {
             .convert();
         let target = cx.shared.target_davell.lock(|t| *t);
 
-        let (dt, pt) = cx.shared.dvel.lock(|t| *t);
-        let dt = dt as f32 / 1_000_000.;
-        const FACTOR: f32 = core::f32::consts::TAU / 86.;
-        let avel = FACTOR / dt;
-
-        // Safe guards.
-
-        // Do not run the PID control loop unless we have hade some velocity for a
-        // while.
-        {
-            // This means that the cyclist will have to start the cart and then once it is
-            // rolling we can start the control system.
-            if unsafe { core::intrinsics::fabsf32(avel) } > 0.1 && *cx.local.started < 10 {
-                *cx.local.started += 1;
-            } else if unsafe { core::intrinsics::fabsf32(avel) } <= 0.1 && *cx.local.started >= 3 {
-                *cx.local.started -= 1;
-            } else {
-                *cx.local.started = 0;
-            }
-            // To mitigate jerking motions we only apply control signals to the system
-            if unsafe { core::intrinsics::fabsf32(avel) } < 0.1 || *cx.local.started < 3 {
-                *cx.local.previous_avel = avel;
-                const RTC_DURATION: rtic_monotonics::fugit::Duration<u64, 1, 32768> =
-                    rtic_monotonics::fugit::Duration::<
-                        u64,
-                        1,
-                        { controller::cart::constants::MOTOR_TIMESCALE as u32 },
-                    >::from_ticks(controller::cart::constants::MOTOR_TS as u64)
-                    .convert();
-                // Ensure that we do not apply any control signal while the motor is not
-                // rolling.
-                cx.shared.duty.lock(|d| *d = 0.);
-                timer.timeout(unsafe {
-                    (start + RTC_DURATION)
-                        .checked_duration_since(Mono::now())
-                        .unwrap_unchecked()
-                });
-                return;
-            }
-        }
-
-        // Control system.
-        let dt = pt as f32 / 1_000_000.;
-        let prev = *cx.local.previous_avel;
-        *cx.local.previous_avel = avel;
-        let mut dvel = (avel - prev) / dt;
+        // Read the latest buffer, disregard any race conditions :).
+        let [_p1c, _p2c, _p3c, mut current] = cx.local.current_sense.complete_sample();
 
         // Remove undefined operations from the pid equations.
         // If the value is unbounded simply floor it to zero.
-        if dvel.is_nan() || dvel.is_infinite() {
-            dvel = 0.;
+        if current.is_nan() || current.is_infinite() {
+            current = 0.;
         }
-        // TODO: Remove this once it is not needed any more.
-        // When the cart is moving with any form of load this should no
-        // longer be needed.
-        let dvel = dvel.clamp(-5., 5.);
 
         // PID constants. These are defined here simply to be more readable.
         const KP: f32 = 100.;
         const KI: f32 = 10.;
         const KD: f32 = 1.;
-        // Gradient in velocity.
-        // This is a pretty good approximation of acceleration
-        // and therefore torque.
-        let del = dvel - *cx.local.previous_dvel;
+
+        // Delta current from the previous iteration.
+        let del = current - *cx.local.current;
 
         // TODO: Remove this ful-hack if at all possible.
         // This will likely not be needed once we have the cart right side up.
         const RATE_LIMIT: f32 = 0.1;
-        let dvel = match (del > RATE_LIMIT, del < RATE_LIMIT) {
+        let current = match (del > RATE_LIMIT, del < RATE_LIMIT) {
             (true, false) => *cx.local.previous_dvel + RATE_LIMIT,
             (false, true) => *cx.local.previous_dvel - RATE_LIMIT,
-            _ => dvel,
+            _ => current,
         };
-        *cx.local.previous_dvel = dvel;
+        *cx.local.current = current;
 
         // Actual PID calculations.
         // These should not need a lot of modifications.
-        let err = target - dvel;
+        let err = target - current;
 
         let p = (KP * err).clamp(-100., 100.);
         let i = (*cx.local.prev + err / 2.) * (DURATION.to_micros() as f32 / 1_000_000.);
@@ -681,9 +637,6 @@ mod etc {
         let actuation = (((actuation + 300.) * RANGE) / 600.) + MIN_DUTY;
         let actuation = actuation.clamp(-1., 1.);
         cx.shared.duty.lock(|duty| *duty = actuation);
-
-        // Log the latest angular acceleration.
-        cx.shared.angle_acc.lock(|acc| *acc = dvel);
 
         // Compute this once, no need to spend cycles on this.
         const RTC_DURATION: rtic_monotonics::fugit::Duration<u64, 1, 32768> =
@@ -720,6 +673,7 @@ mod etc {
         }
     }
 
+    /*
     #[task(binds = PWM0, shared=[current_sense], priority = 3)]
     fn start_sample(mut cx: start_sample::Context) {
         cx.shared.current_sense.lock(|sense| {
@@ -762,4 +716,5 @@ mod etc {
             *target = current;
         });
     }
+    */
 }

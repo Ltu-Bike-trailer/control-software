@@ -111,7 +111,7 @@ mod etc {
     fn init(cx: init::Context) -> (Shared, Local) {
         defmt::info!("init");
         nrf52840_hal::Clocks::new(cx.device.CLOCK)
-            .enable_ext_hfosc()
+            //.enable_ext_hfosc()
             .start_lfclk();
         Mono::start(cx.device.RTC0);
 
@@ -361,6 +361,9 @@ mod etc {
         if intermediate & 0b11 == 0b11 {
             return 0;
         }
+        if true {
+            return intermediate & 0b11;
+        }
         ret |= (intermediate & 0b1) << 1;
         let intermediate = intermediate >> 1;
         ret |= intermediate & 0b1;
@@ -431,9 +434,9 @@ mod etc {
                             match drive_pattern {
                                 $(
                                     [<$value>] => {
-                                        phase1.modify_channels::<2,{field_extract::<0,$value>()}>();
-                                        phase2.modify_channels::<2,{field_extract::<1,$value>()}>();
-                                        phase3.modify_channels::<2,{field_extract::<2,$value>()}>();
+                                        phase1.modify_channels::<{field_extract::<0,$value>()},2>();
+                                        phase2.modify_channels::<{field_extract::<1,$value>()},2>();
+                                        phase3.modify_channels::<{field_extract::<2,$value>()},2>();
                                     }
                                 )*,
                                 _ => unreachable!()
