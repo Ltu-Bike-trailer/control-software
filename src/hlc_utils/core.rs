@@ -5,10 +5,7 @@
 
 use core::f32;
 
-use nrf52840_hal::{
-    gpio::*,
-    gpiote::*,
-};
+use nrf52840_hal::{gpio::*, gpiote::*};
 
 /// Common functionality related to how to handle sensor input. 
 pub trait SensorHandler {
@@ -16,17 +13,13 @@ pub trait SensorHandler {
     fn get_periodic_input();
 }
 
-/// This would listen for programable switch event, 
-/// and start calibration. 
-pub trait Calibration {
+/// This would listen for programable switch event,
+/// and start calibration.
+pub trait Calibration {}
 
-}
-
-/// Core functionality related to the Canbus that is not 
-/// driver specific. 
-pub trait Canbus {
-
-}
+/// Core functionality related to the Canbus that is not
+/// driver specific.
+pub trait Canbus {}
 
 enum Constants {
     A1,
