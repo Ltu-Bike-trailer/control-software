@@ -21,6 +21,8 @@ use controller as _; // global logger + panicking-behavior + memory layout
 )]
 
 mod app {
+   // use core::error::Source;
+
     use defmt::info;
 // use embedded_hal::digital::OutputPin;
    // use core::arch::asm;
@@ -73,15 +75,12 @@ mod app {
         defmt::info!("init");
         let device = cx.device;
 
-       // let clk = Clocks::new(device.CLOCK).enable_ext_hfosc().start_lfclk();
-       // Mono::start(device.RTC0);
         // set up pins
         let port0 = hal::gpio::p0::Parts::new(device.P0);
         //let _port1 = hal::gpio::p1::Parts::new(cx.device.P1);
 
-        
-        // setup monotonic systic for peroidic interupts 
-        let sysclk = 16_000_000;
+        // setup monotonic systic for periodic interrupts 
+        let sysclk = 64_000_000;
         let token = rtic_monotonics::create_systick_token!();
         Systick::start(cx.core.SYST, sysclk, token);
 
@@ -93,9 +92,12 @@ mod app {
         // Estimate the current state of charge in battery
         // TODO add logic to estimate charge using battery temp and voltage 
         let _saadc_result = saadc.read_channel(&mut saadc_pin).unwrap() as f32;
-
-        // set up state of charge varibles
         let old_soc: f32 = 0.0;
+
+
+
+
+        // set up state of charge variables
         let curr_soc: f32 = 0.0;
 
         // set up CAN
@@ -123,19 +125,18 @@ mod app {
         let spi_can: Spi<SPI0> = unsafe { (0x0 as *mut Spi<SPI0>).read() };
         let settings = Mcp2515Settings::default();
         let can_driver = Mcp2515Driver::init(spi_can, cs0, can_interrupt, settings);
-        info!("can done");
 
-        // new interupt (should not be used as this firmware only sends data)
+        // new interrupt (should not be used as this firmware only sends data)
         let gpiote = Gpiote::new(device.GPIOTE);
         gpiote
             .channel0()
             .input_pin(&can_driver.interrupt_pin)
             .hi_to_lo()
             .enable_interrupt();
-        info!("can interupt done");
+
         // create sender to be able to send data via can
         let sender: Sender<_> = Sender::new();
-        info!("sender done");
+
 
         (
             Shared {
@@ -166,7 +167,7 @@ mod app {
     async fn analog_read(cx: analog_read::Context) {
         info!("analog read task started");
 
-        // set up varibles for easier readibility
+        // set up variables for easier readability
         let saadc = cx.local.saadc;
         let saadc_pin = cx.local.saadc_pin;
         let old_soc = cx.local.old_soc;
@@ -180,12 +181,12 @@ mod app {
             Err(_) => {return},
         } as f32;
 
-        // remove negative analog results incase of calibration errors (should be handled better but need more time for that) 
+        // remove negative analog results in case of calibration errors (should be handled better but need more time for that) 
         if saadc_result < 0.0 {
             saadc_result = 0.0; 
         }
 
-        // Transform ADC to Voltage ((analog_sample * voltage_ref)/resulution)
+        // Transform ADC to Voltage ((analog_sample * voltage_ref)/resolution)
         let curr_voltage: f32 = (saadc_result * 3.3)/(1<<14) as f32;
         info!("Saadc_result is {}, and curr voltage is {}, ", saadc_result, curr_voltage);
 
@@ -213,31 +214,9 @@ mod app {
         *old_soc = curr_soc;
         info!("current SoC is {}", old_soc);
 
-        Systick::delay(5000.millis()).await;
+        Systick::delay(500.millis()).await;
     }
 
-
-    /* 
-    #[task(priority = 1, local=[], shared=[])]
-    async fn send_can(cx: send_can::Context) {
-        // set up varibles for easier readibility
-        let can_driver = cx.local.can_driver;
-        let sender = cx.local.sender;
-        let current_state_of_charge: f32;
-        // mutex on curr_soc varuble
-        cx.shared.curr_soc.lock(|curr_soc|{
-            let get_soc:f32 = *curr_soc;
-            current_state_of_charge = get_soc;
-            
-        });
-
-        sender.set_status_battery(current_state_of_charge).unwrap();
-        
-        let mut msg = sender.dequeue().unwrap();
-        msg.print_frame();
-        can_driver.transmit(&msg).unwrap();
-    }
-   */
     #[task(binds = GPIOTE, shared = [gpiote])]
     fn can_interrupt(mut cx: can_interrupt::Context) {
         //Do nothing this board has a shared SPI bus so its dangerous to read whenever
