@@ -227,9 +227,25 @@ mod app {
             cx.shared.sender.lock(|sender|{
                 //sender.set_right_motor(1.0).unwrap();
                 sender.set_left_motor(1.3).unwrap();
-                sender.set_load_cell_front(1.2).unwrap();
+                sender.set_left_motor(1.3).unwrap();
+                sender.set_left_motor(1.2).unwrap();
+                sender.set_left_motor(1.1).unwrap();
+                sender.set_left_motor(1.1).unwrap();
+
+
+                sender.set_load_cell_front(1.6).unwrap();
+                sender.set_load_cell_front(1.6).unwrap();
+                sender.set_load_cell_front(1.5).unwrap();
+                sender.set_load_cell_front(1.5).unwrap();
+
+
                 sender.set_load_cell_bed(1.1);
+                sender.set_load_cell_bed(1.1);
+                sender.set_load_cell_bed(1.2);
+
+
                 sender.set_theta(1.2_f32);
+                //sender.enqueue(protocol::MessageType::FixedLog(protocol::FixedLogType::BatteryStatus(protocol::BatteryStatus(0.5))));
                 //sender.set_theta(2.4_f32);
             });
             Mono::delay(400u32.millis().into()).await;            
