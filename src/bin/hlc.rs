@@ -248,16 +248,14 @@ mod hlc {
     #[task(binds = SAADC, local=[stype], shared =[s_type_force], priority=2)]
     fn read_stype(mut cx: read_stype::Context) {
         let [sample] = cx.local.stype.complete_sample(conv);
-
-        defmt::info!("Sample : {:?}", sample);
-
+        
         // Scale in between.
         const GAIN: f32 = 10.;
         let converted = GAIN * sample;
-        defmt::info!("Measured {}N", converted);
-
+        
         cx.shared.s_type_force.lock(|f| *f = converted);
-
+        defmt::trace!("Measured {}N", converted);
+        
         cx.local.stype.start_sample();
     }
 
@@ -272,13 +270,8 @@ mod hlc {
                 .read_full_period::<Mono, _, _>(Gain::Apply128)
                 .await;
             let decoded_data = cx.local.hx711.decode_data(data);
-            defmt::println!(
-                "Data [24-bit]: {:024b}\n Data: {:?}\nData [32-bit]: {:032b}",
-                data,
-                data,
-                data
-            );
-            defmt::println!("Decoded Data: {:?}", decoded_data.data_out);
+
+            defmt::trace!("Decoded Data: {:?}", decoded_data.data_out);
 
             // Write the data to the shared variable
             cx.shared
