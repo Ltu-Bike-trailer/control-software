@@ -5,6 +5,10 @@
 #![deny(warnings)]
 #![feature(generic_arg_infer)]
 
+// optimization errors 
+#![allow(dead_code)]
+#![allow(unused_assignments)]
+
 use controller as _; // global logger + panicking-behavior + memory layout
 
 
@@ -33,12 +37,12 @@ mod app {
         gpio::*,
         gpiote::Gpiote,
         pac::SPI0,
-        spi::Spi,
-        pac::Peripherals,
+        spi::{Frequency, Spi},
+        //pac::Peripherals,
         saadc::SaadcConfig,    
         //Clocks,
     };
-   // use rtic_monotonics::Monotonic;
+    use rtic_monotonics::systick::*;
 
     //use crate::Mono;
 
@@ -46,7 +50,7 @@ mod app {
     #[shared]
     struct Shared {
         // TODO: Add resources
-        
+        gpiote: Gpiote,
 
     }
 
@@ -54,6 +58,7 @@ mod app {
     #[local]
     struct Local {
         // TODO: Add resources
+        spi_battery: Spi<SPI0>,
         curr_soc: f32,
         saadc: hal::saadc::Saadc,
         saadc_pin: p0::P0_31<Input<Floating>>,
@@ -66,30 +71,28 @@ mod app {
     #[init]
     fn init(cx: init::Context) -> (Shared, Local) {
         defmt::info!("init");
-        let device = Peripherals::take().unwrap();
+        let device = cx.device;
 
-        //let clk = Clocks::new(device.CLOCK).enable_ext_hfosc().start_lfclk();
-        // Mono::start(device.RTC0);
+       // let clk = Clocks::new(device.CLOCK).enable_ext_hfosc().start_lfclk();
+       // Mono::start(device.RTC0);
         // set up pins
-        let port0 = hal::gpio::p0::Parts::new(cx.device.P0);
-        let _port1 = hal::gpio::p1::Parts::new(cx.device.P1);
+        let port0 = hal::gpio::p0::Parts::new(device.P0);
+        //let _port1 = hal::gpio::p1::Parts::new(cx.device.P1);
 
-        /* 
+        
         // setup monotonic systic for peroidic interupts 
         let sysclk = 16_000_000;
         let token = rtic_monotonics::create_systick_token!();
         Systick::start(cx.core.SYST, sysclk, token);
-        */
 
         // set up saadic(Successive approximation analog-to-digital converter)
         let saadc_config = SaadcConfig::default();
-        let mut saadc = hal::saadc::Saadc::new(cx.device.SAADC, saadc_config);
+        let mut saadc = hal::saadc::Saadc::new(device.SAADC, saadc_config);
         let mut saadc_pin: p0::P0_31<Input<Floating>> = port0.p0_31.into_floating_input();
-
+        
         // Estimate the current state of charge in battery
         // TODO add logic to estimate charge using battery temp and voltage 
         let _saadc_result = saadc.read_channel(&mut saadc_pin).unwrap() as f32;
-        
 
         // set up state of charge varibles
         let old_soc: f32 = 0.0;
@@ -103,16 +106,24 @@ mod app {
         let miso: Pin<Input<Floating>> = port0.p0_21.into_floating_input().degrade();
         let mosi: Pin<Output<PushPull>> = port0.p0_22.into_push_pull_output(Level::Low).degrade();
 
-        let _spi_pins = hal::spi::Pins {
+        let spi_pins = hal::spi::Pins {
             sck: Some(sck),
             miso: Some(miso),
             mosi: Some(mosi),
         };
 
+        let spi_battery: Spi<SPI0> = Spi::new(
+            device.SPI0,
+            spi_pins,
+            Frequency::K250,
+            embedded_hal::spi::MODE_0,
+        );
+
         // set up can setting
         let spi_can: Spi<SPI0> = unsafe { (0x0 as *mut Spi<SPI0>).read() };
         let settings = Mcp2515Settings::default();
         let can_driver = Mcp2515Driver::init(spi_can, cs0, can_interrupt, settings);
+        info!("can done");
 
         // new interupt (should not be used as this firmware only sends data)
         let gpiote = Gpiote::new(device.GPIOTE);
@@ -121,20 +132,19 @@ mod app {
             .input_pin(&can_driver.interrupt_pin)
             .hi_to_lo()
             .enable_interrupt();
-
+        info!("can interupt done");
         // create sender to be able to send data via can
         let sender: Sender<_> = Sender::new();
+        info!("sender done");
 
-
-        analog_read::spawn().ok();
         (
             Shared {
                 // Initialization of shared resources go here
-                  
+                gpiote
             },
             Local {
                 // Initialization of local resources go here
-                saadc, saadc_pin, old_soc, sender, can_driver, curr_soc
+                saadc, saadc_pin, old_soc, sender, can_driver, curr_soc, spi_battery
 
             },
         )
@@ -146,39 +156,50 @@ mod app {
         defmt::info!("idle");
 
         loop {
-           // analog_read::spawn().ok();
+            analog_read::spawn().ok();
             continue;
         }
     }
     
     // TODO: Add tasks
-    #[task(priority = 1, local=[saadc, saadc_pin, old_soc, curr_soc, can_driver, sender])]
+    #[task(priority = 1, local=[saadc, saadc_pin, old_soc, /*curr_soc,*/ can_driver, sender])]
     async fn analog_read(cx: analog_read::Context) {
-         // set up varibles for easier readibility
+        info!("analog read task started");
+
+        // set up varibles for easier readibility
         let saadc = cx.local.saadc;
         let saadc_pin = cx.local.saadc_pin;
-        let old_soc:f32 = *cx.local.old_soc;
-        let curr_soc:f32 = *cx.local.curr_soc;
+        let old_soc = cx.local.old_soc;
+        let mut curr_soc:f32 = 0.0;
         let can_driver = cx.local.can_driver;
         let sender = cx.local.sender;
 
         // read value from saadc_pin
-        let mut saadc_result = saadc.read_channel(saadc_pin).unwrap() as f32;
+        let mut saadc_result = match saadc.read_channel(saadc_pin) {
+            Ok(m) => {m},
+            Err(_) => {return},
+        } as f32;
 
         // remove negative analog results incase of calibration errors (should be handled better but need more time for that) 
         if saadc_result < 0.0 {
             saadc_result = 0.0; 
         }
-    
+
+        // Transform ADC to Voltage ((analog_sample * voltage_ref)/resulution)
         let curr_voltage: f32 = (saadc_result * 3.3)/(1<<14) as f32;
         info!("Saadc_result is {}, and curr voltage is {}, ", saadc_result, curr_voltage);
-        // transform ADC to Voltage ((analog_sample * voltage_ref)/resulution)
-        
-        
-        // info!("current_voltage is {}", curr_voltage);
-        
 
-        if curr_soc < (old_soc-0.01) {
+        // voltage divider rule to get the volt in (volt_out = volt_in * (R2/(R1+R2)))
+        let volt_in = curr_voltage*(4700.0+10000.0)/10000.0;
+
+        // Calculate current in shunt resistor
+        let i_shunt = volt_in/(50.0 * 0.003);
+        
+        // Calculate current state of charge(curr_soc = old_soc - (i_shunt*delta_t)/Q)
+        curr_soc = *old_soc - i_shunt/60.0 * 0.5;
+        
+        // if the old State of Charge(soc) has lowered by 1% send the new soc via CAN
+        if curr_soc < (*old_soc-0.01) {
             let _ = sender.set_status_battery(curr_soc);
             let mut msg = match sender.dequeue() {
                 Some(m) => m,
@@ -186,8 +207,13 @@ mod app {
             };
             msg.print_frame();
             let _ = can_driver.transmit(&msg);
-
         }
+
+        // set current state of charge to the old state of carge
+        *old_soc = curr_soc;
+        info!("current SoC is {}", old_soc);
+
+        Systick::delay(5000.millis()).await;
     }
 
 
@@ -212,5 +238,13 @@ mod app {
         can_driver.transmit(&msg).unwrap();
     }
    */
+    #[task(binds = GPIOTE, shared = [gpiote])]
+    fn can_interrupt(mut cx: can_interrupt::Context) {
+        //Do nothing this board has a shared SPI bus so its dangerous to read whenever
+        //also it has no reason to read any messages of the can bus.
+        let _ = cx.shared.gpiote.lock(|gpiote| {
+            gpiote.reset_events();
+        });
+    }
 
 }
