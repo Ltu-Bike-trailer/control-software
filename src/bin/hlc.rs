@@ -117,7 +117,7 @@ mod hlc {
         );
 
         let can_settings = Mcp2515Settings::default();
-        let mut can_driver = Mcp2515Driver::init(spi, cs_pin, int_pin, can_settings);
+        let mut can_driver = Mcp2515Driver::init(spi, cs_pin, can_interrupt, can_settings);
         
         let (send, receive) = make_channel!(CanMessage, 10);
         let mut sender = Sender::new();

@@ -60,7 +60,7 @@ impl Controller {
     #[inline(always)]
     ///
     pub fn actuate(&mut self, output_torque: f32, error: f32) -> f32{
-        let ek1 = self.get_err::<1>();
+        let _ek1 = self.get_err::<1>();
         
         // Do things
         //
