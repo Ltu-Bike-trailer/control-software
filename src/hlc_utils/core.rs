@@ -61,9 +61,13 @@ impl Controller {
     ///
     pub fn actuate(&mut self, output_torque: f32, error: f32) -> f32 {
         let _ek1 = self.get_err::<1>();
+        let _ek2 = self.get_err::<2>();
+        let _ek3 = self.get_err::<3>();
 
         // Do things
         //
+        
+
         self.write_torque(output_torque);
         self.write_err(error);
         unimplemented!();
