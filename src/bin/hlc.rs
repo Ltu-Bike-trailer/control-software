@@ -29,7 +29,7 @@ mod hlc {
     use nrf52840_hal::{
         gpio::{
             self,
-            p0::P0_29,
+            p0::P0_04,
             Disconnected,
             Floating,
             Input,
@@ -123,22 +123,18 @@ mod hlc {
         let mut sender = Sender::new();
         //sender.set_left_motor(1.0).unwrap();
 
-        //TODO Change these pins to be the proper ones
         // HX711
-        let dout_pin = port0.p0_04.into_floating_input().degrade();
-        let pd_sck = port0.p0_09.into_push_pull_output(Level::Low).degrade();
-        let pwm_output_pin = port0.p0_07.into_push_pull_output(Level::High).degrade();
+        // "9","P1.09/TRACEDATA3","HX711 Data"
+        let dout_pin = port1.p1_09.into_floating_input().degrade();
+        // "10","P0.11/TRACEDATA2","HX711 SCK"
+        let pd_sck = port0.p0_11.into_push_pull_output(Level::Low).degrade();
 
-        let mut pwm = Pwm::new(device.PWM0);
         let mut hx711_instance =
             Hx711Driver::init(pd_sck, dout_pin, Gain::Apply128, ValidTimings::default());
 
-        pwm.set_output_pin(Channel::C0, pwm_output_pin)
-            .set_period(500u32.hz())
-            .enable();
 
         // S-Type Load cell
-        // TODO set the correct pin
+        // "4","P0.04/AIN2","S-Type Load Cell Amplifier"
         // ADC configuration.
         let mut cfg = SaadcConfig::default();
         cfg.time = Time::_40US;
@@ -146,17 +142,15 @@ mod hlc {
         cfg.oversample = saadc::Oversample::OVER256X;
         cfg.reference = saadc::Reference::INTERNAL;
 
-        //TODO update to correct pin
         // The input pin.
-        let input = port0.p0_29;
+        let input = port0.p0_04;
 
-        //TODO update to correct pin
         //This is probably wrong is some way taken dirrectly from S-type calibration
         // and modified
         let mut adc: SaadcTask<1> = SaadcTask::new(
             device.SAADC,
             cfg,
-            &[<P0_29<Disconnected> as saadc::Channel>::channel()],
+            &[<P0_04<Disconnected> as saadc::Channel>::channel()],
             [0],
         );
 
@@ -248,7 +242,7 @@ mod hlc {
     #[task(binds = SAADC, local=[stype], shared =[s_type_force], priority=2)]
     fn read_stype(mut cx: read_stype::Context) {
         let [sample] = cx.local.stype.complete_sample(conv);
-        
+
         // Scale in between.
         const GAIN: f32 = 10.;
         let converted = GAIN * sample;
