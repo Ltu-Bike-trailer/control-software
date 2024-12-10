@@ -133,12 +133,6 @@ mod hlc {
         let mut hx711_instance =
             Hx711Driver::init(pd_sck, dout_pin, Gain::Apply128, ValidTimings::default());
 
-        gpiote
-            .channel1()
-            .input_pin(&hx711_instance.dout)
-            .hi_to_lo()
-            .enable_interrupt();
-
         pwm.set_output_pin(Channel::C0, pwm_output_pin)
             .set_period(500u32.hz())
             .enable();
