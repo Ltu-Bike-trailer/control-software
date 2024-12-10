@@ -13,7 +13,7 @@ pub trait SensorHandler {
     fn get_periodic_input();
 }
 
-/// This would listen for programable switch event,
+/// This would listen for programmable switch event,
 /// and start calibration.
 pub trait Calibration {}
 
@@ -36,7 +36,7 @@ enum Constants {
 /// The equation for the discrete controller, takes three 
 /// past/lagging values for the input and output.
 /// As (k-1), (k-2), and (k-3), for the corresponding output 
-/// and input togheter with their associated `Constants`.
+/// and input together with their associated `Constants`.
 pub struct Controller{
     t_output: [f32; 3],
     e_input:  [f32; 3],

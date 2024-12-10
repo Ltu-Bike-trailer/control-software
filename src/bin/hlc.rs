@@ -145,7 +145,7 @@ mod hlc {
         // The input pin.
         let input = port0.p0_04;
 
-        //This is probably wrong is some way taken dirrectly from S-type calibration
+        //This is probably wrong is some way taken directly from S-type calibration
         // and modified
         let mut adc: SaadcTask<1> = SaadcTask::new(
             device.SAADC,

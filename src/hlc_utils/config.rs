@@ -1,4 +1,4 @@
-//! Defines peripheral, Pin, and GPIO(TE) config for the "High-Level-Controller.
+//! Defines peripheral, Pin, GPIO and GPIOTE config for the "High-Level-Controller.
 #![deny(warnings, missing_docs)]
 #![allow(unused_imports, dead_code)]
 
