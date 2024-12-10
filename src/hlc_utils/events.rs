@@ -2,16 +2,13 @@
 #![deny(warnings, missing_docs)]
 #![allow(unused_imports)]
 
-use lib::protocol::*;
+use lib::protocol::MessageType;
 
 #[derive(Clone, Debug)]
-/// Possible events, that the HLC, should react to. 
+/// Possible events, that the HLC, should react to.
 pub enum HlcEvents {
     /// Calibration event.
     Calibration,
     /// Sensor (input) specific event.
     SensorInput(MessageType),
-
-    
 }
-

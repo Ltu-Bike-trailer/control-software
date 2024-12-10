@@ -2,11 +2,9 @@
 #![no_main]
 #![allow(unused)]
 #![feature(generic_arg_infer)]
-use controller as _;
-use controller::drivers::{
-    hx711::*,
-};
 use can_mcp2515::drivers::can::*;
+use controller as _;
+use controller::drivers::hx711::*;
 use cortex_m::asm as _;
 use cortex_m_rt::entry;
 use defmt_rtt as _;
@@ -19,14 +17,9 @@ nrf_rtc0_monotonic!(Mono);
 
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC1])]
 mod app {
-    
+
     use can_mcp2515::drivers::can::*;
-    use controller::{
-        boards::*,
-        drivers::{
-            hx711::*,
-        },
-    };
+    use controller::{boards::*, drivers::hx711::*};
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};
     use embedded_hal::{digital::OutputPin, spi::SpiBus};

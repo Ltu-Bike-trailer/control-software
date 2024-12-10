@@ -1,20 +1,24 @@
-//! Defines peripheral, Pin, and GPIO(TE) config for the "High-Level-Controller.
+//! Defines peripheral, Pin, GPIO and GPIOTE config for the
+//! "High-Level-Controller.
 #![deny(warnings, missing_docs)]
 #![allow(unused_imports, dead_code)]
 
 use embedded_hal::spi::MODE_0;
 use nrf52840_hal::{
-    gpio::{self, Pin, *}, gpiote::*, pac::GPIOTE, spi::{Instance, Spi}
+    gpio::{self, Pin, *},
+    gpiote::*,
+    pac::GPIOTE,
+    spi::{Instance, Spi},
 };
 
 /// HLC board pins for the SPI interfacing the CAN driver.
 pub struct CanSpi {
-    /// 
+    ///
     pub sck: Pin<Output<PushPull>>,
     ///
     pub mosi: Pin<Output<PushPull>>,
     ///
-    pub miso: Pin<Input<Floating>>, 
+    pub miso: Pin<Input<Floating>>,
 }
 
 /// Can Pins.
@@ -24,9 +28,8 @@ pub struct CanManager {
     int: Pin<Input<PullUp>>,
 }
 
-
 impl CanManager {
-    /// Creates and return the Can pin mapping 
+    /// Creates and return the Can pin mapping
     pub fn new(p0: p0::Parts, p1: p1::Parts) -> Self {
         Self {
             spi: CanSpi {
@@ -39,8 +42,13 @@ impl CanManager {
         }
     }
 
-    /// Returns ownership of a tuple containing the cs pin, int pin and the `Spi` instance.   
-    pub fn peripheral_instances<SPI: Instance>(self, spi: SPI, gp :GPIOTE) -> (Pin<Output<PushPull>>, Pin<Input<PullUp>>, Spi<SPI>, Gpiote){
+    /// Returns ownership of a tuple containing the cs pin, int pin and the
+    /// `Spi` instance.
+    pub fn peripheral_instances<SPI: Instance>(
+        self,
+        spi: SPI,
+        gp: GPIOTE,
+    ) -> (Pin<Output<PushPull>>, Pin<Input<PullUp>>, Spi<SPI>, Gpiote) {
         let pins = nrf52840_hal::spi::Pins {
             sck: Some(self.spi.sck),
             mosi: Some(self.spi.mosi),
@@ -57,9 +65,4 @@ impl CanManager {
 
         (self.cs, self.int, spi_device, gpiote)
     }
-
 }
-
-
-
-
