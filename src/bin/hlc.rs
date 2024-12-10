@@ -82,7 +82,7 @@ mod hlc {
         let device = cx.device;
         let port0 = gpio::p0::Parts::new(device.P0);
         let port1 = gpio::p1::Parts::new(device.P1);
-        
+
         let clk = Clocks::new(device.CLOCK).enable_ext_hfosc().start_lfclk();
         Mono::start(device.RTC0);
 
@@ -118,7 +118,7 @@ mod hlc {
 
         let can_settings = Mcp2515Settings::default();
         let mut can_driver = Mcp2515Driver::init(spi, cs_pin, can_interrupt, can_settings);
-        
+
         let (send, receive) = make_channel!(CanMessage, 10);
         let mut sender = Sender::new();
         //sender.set_left_motor(1.0).unwrap();
@@ -131,7 +131,6 @@ mod hlc {
 
         let mut hx711_instance =
             Hx711Driver::init(pd_sck, dout_pin, Gain::Apply128, ValidTimings::default());
-
 
         // S-Type Load cell
         // "4","P0.04/AIN2","S-Type Load Cell Amplifier"
@@ -246,10 +245,10 @@ mod hlc {
         // Scale in between.
         const GAIN: f32 = 10.;
         let converted = GAIN * sample;
-        
+
         cx.shared.s_type_force.lock(|f| *f = converted);
         defmt::trace!("Measured {}N", converted);
-        
+
         cx.local.stype.start_sample();
     }
 

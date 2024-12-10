@@ -12,4 +12,3 @@ pub enum HlcEvents {
     /// Sensor (input) specific event.
     SensorInput(MessageType),
 }
-

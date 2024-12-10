@@ -29,7 +29,7 @@ pub const ADC_GAIN: f32 = 1. / 6.;
 ///
 /// RESULT = [V(P) – V(N)] * (GAIN/REFERENCE) * 1<<(RESOLUTION - m)
 /// V(P) - V(N) = RESULT/((GAIN/REFERENCE) * 1<<(RESOLUTION - m))
-#[must_use] 
+#[must_use]
 pub const fn raw_adc_to_current_factor() -> f32 {
     //(ADC_GAIN / V_REF) * ((1 << ADC_BITS) as f32) * v_div()
     //(V_REF / ((1 << ADC_BITS) as f32)) / ADC_GAIN
@@ -39,7 +39,7 @@ pub const fn raw_adc_to_current_factor() -> f32 {
 }
 
 /// Returns the voltage divider
-#[must_use] 
+#[must_use]
 pub const fn v_div() -> f32 {
     (R_PHASE_SENSE_TO_GROUND + R_PHASE_SENSE_TO_VIN) / R_PHASE_SENSE_TO_GROUND
 }
