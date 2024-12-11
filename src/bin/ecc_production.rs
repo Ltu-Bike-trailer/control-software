@@ -33,7 +33,10 @@ mod etc {
 
     use controller::{
         bldc::{DrivePattern, FloatDuty, Pattern},
-        cart,
+        cart::{
+            self,
+            constants::{DURATION, KD, KI, KP, MIN_DUTY, RANGE},
+        },
         drivers::can::{AcceptanceFilterMask, CanInte, Mcp2515Driver, Mcp2515Settings},
         RingBuffer,
     };
@@ -360,19 +363,148 @@ mod etc {
             let _ = cx.local.can.transmit(&message);
         }
     }
-    //static mut QUEUE: [];
 
-    const fn field_extract<const N: usize, const VAL: usize>() -> usize {
-        let mut ret = 0;
-        let intermediate = VAL >> N * 2;
-        if intermediate & 0b11 == 0b11 {
-            return 0;
+    #[task(binds = TIMER3,
+        local = [
+            // TIMER3 but as value.
+            control_loop_timer,
+            // Latest angular velocity.
+            previous_avel: f32 = 0.,
+            // Latest gradient in angular velocity.
+            previous_dvel: f32 = 0.,
+            // Previous error.
+            previous_error: f32 = 0.,
+            // Integral component accumulator.
+            integral: f32 = 0.,
+            // Counter for wether or not the cart control system should be allowed to run.
+            started:u32 = 0,
+            // The previous current
+            current:f32 = 0.,
+            kp:f32= 0.,
+            ki:Option<f32> = None,
+            kd:Option<f32> = None,
+            loop_counter:usize = 0,
+            buffer,
+        ],
+        shared = [
+            // The target duty cycle.
+            duty,
+            // The latest current measurement.
+            // This is unused but it is left for ease of porting.
+            current,
+            // The components needed for torque control.
+            dvel,
+            // Current angular acceleration. This allows for non intrusive logging.
+            angle_acc,
+            // The target gradient in angular velocity.
+            target_davell,
+        ],
+        priority = 4,
+    )]
+    /// Runs the PID control loop for constant torque.
+    ///
+    /// Due to performance requirements this was moved in to the function to
+    /// greatly simplify the optimizations.
+    fn control_loop(mut cx: control_loop::Context) {
+        // This will miss by a few nano seconds, it is fine for our applications.
+        let start: rtic_monotonics::fugit::Instant<u64, 1, 16_000_000> = Mono::now();
+        let control_loop_timer = cx.local.control_loop_timer;
+        control_loop_timer.reset_event();
+
+        let target = cx.shared.target_davell.lock(|t| *t);
+
+        let current = cx.shared.current.lock(|current| {
+            let ret = *current;
+            ret
+        });
+
+        // TODO: Remove this ful-hack if at all possible.
+        *cx.local.current = current;
+
+        // Actual PID calculations.
+        // These should not need a lot of modifications.
+        let current_error = target - current;
+
+        let p_component = (KP * current_error).clamp(-100., 100.);
+        let i_component = (*cx.local.previous_error + current_error / 2.)
+            * (DURATION.to_micros() as f32 / 1_000_000.);
+        *cx.local.integral = (*cx.local.integral + i_component).clamp(-100., 100.);
+        let i_component = KI * *cx.local.integral;
+        let d_component = KD
+            * ((current_error - *cx.local.previous_error)
+                / (DURATION.to_micros() as f32 / 1_000_000.))
+                .clamp(-100., 100.);
+        *cx.local.previous_error = current_error;
+
+        let actuation = p_component + i_component + d_component;
+
+        // Ensure that we get a percentage.
+        let actuation = (((actuation + 150.) * RANGE) / 300.) + MIN_DUTY;
+        let actuation = actuation.clamp(-1., 1.);
+
+        cx.shared.duty.lock(|duty| *duty = actuation);
+
+        *cx.local.loop_counter = cx.local.loop_counter.wrapping_add(1);
+
+        let time_to_sleep = (start + DURATION) - Mono::now();
+
+        // Wait until the next control loop iteration.
+        control_loop_timer.timeout(time_to_sleep);
+
+        // Compute an intermediate representation of torque. This is no longer needed
+        // but will be logger over the CAN bus for ease of debugging.
+        let (delta_time, previous_delta_time) = cx.shared.dvel.lock(|t| *t);
+        let delta_time = delta_time as f32 / 1_000_000.;
+        const FACTOR: f32 = core::f32::consts::TAU / 86.;
+        let angular_velocity = FACTOR / delta_time;
+
+        let delta_time = previous_delta_time as f32 / 1_000_000.;
+        let prev = *cx.local.previous_avel;
+        *cx.local.previous_avel = angular_velocity;
+        let angular_acceleration = (angular_velocity - prev) / delta_time;
+
+        if *cx.local.loop_counter % 3 == 0 {
+            let element = controller::util::ControlLog::new(
+                current,
+                angular_velocity,
+                angular_acceleration,
+                start.duration_since_epoch().to_micros(),
+                target,
+            );
+            unsafe { controller::util::DATA.write(element) };
         }
-        ret |= (intermediate & 0b1) << 1;
-        let intermediate = intermediate >> 1;
-        ret |= intermediate & 0b1;
-        ret
     }
+
+    /// Starts an adc sample.
+    ///
+    /// This ensures that we start sampling on start of the pwm signal.
+    #[task(binds = PWM0, shared=[current_sense], priority = 3)]
+    fn start_sample(mut cx: start_sample::Context) {
+        cx.shared.current_sense.lock(|sense| {
+            sense.start_sample();
+        });
+
+        // Disable interrupts until next time.
+        nrf52840_hal::pac::NVIC::mask(nrf52840_hal::pac::interrupt::PWM0);
+    }
+
+    /// Samples all of the phases current on the rising edge of the pwm signal.
+    ///
+    /// This samples all of the currents but returns only the global system
+    /// current as this is a smoother signal.
+    #[task(binds = SAADC, shared = [current,current_sense], priority=3)]
+    /// Continuously samples the current.
+    fn current_sense(mut cx: current_sense::Context) {
+        let sample = cx
+            .shared
+            .current_sense
+            .lock(|sense| sense.complete_sample());
+
+        cx.shared.current.lock(|current| {
+            *current = (sample[3] + *current) / 2.;
+        });
+    }
+
     #[task(local = [phase1,phase2,phase3],shared = [duty,pattern],priority = 2)]
     #[inline(never)]
     /// Drives the phases of the motor.
@@ -416,8 +548,8 @@ mod etc {
                 }
                 // NOTE: This could likely be removed, increasing current
                 // consumption slightly but improving the
-                // performance of the etc. Mono::delay(50u64.
-                // micros()).await;
+                // performance of the etc.
+                Mono::delay(50u64.micros()).await;
             }
             let ((p1h, p1l), (p2h, p2l), (p3h, p3l)) = old_pattern.get(duty);
             // Apply the switching pattern.
@@ -508,200 +640,5 @@ mod etc {
             phase2.set_duty(duty);
             phase3.set_duty(duty);
         }
-    }
-
-    #[task(shared = [duty], priority = 3)]
-    /// NOTE: Left for completeness and testing purposes. This can be
-    /// substituted for the control system to apply a specific duty cycle
-    /// for a specific amount of time.
-    async fn mono_sweep(mut cx: mono_sweep::Context) {
-        loop {
-            cx.shared.duty.lock(|duty| {
-                *duty -= 0.1;
-                if *duty <= 0.1 {
-                    *duty = 0.1;
-                }
-                defmt::info!("Using {} duty cycle", *duty);
-            });
-            Mono::delay(10u32.secs().into()).await;
-        }
-    }
-    #[task(binds = TIMER3,
-        local = [
-            // TIMER3 but as value.
-            control_loop_timer,
-            // Latest angular velocity.
-            previous_avel: f32 = 0.,
-            // Latest gradient in angular velocity.
-            previous_dvel: f32 = 0.,
-            // Previous error.
-            prev: f32 = 0.,
-            // Integral component accumulator.
-            integral: f32 = 0.,
-            // Counter for wether or not the cart control system should be allowed to run.
-            started:u32 = 0,
-            // The previous current
-            current:f32 = 0.,
-            kp:f32= 0.,
-            ki:Option<f32> = None,
-            kd:Option<f32> = None,
-            loop_counter:usize = 0,
-            buffer,
-        ],
-        shared = [
-            // The target duty cycle.
-            duty,
-            // The latest current measurement.
-            // This is unused but it is left for ease of porting.
-            current,
-            // The components needed for torque control.
-            dvel,
-            // Current angular acceleration. This allows for non intrusive logging.
-            angle_acc,
-            // The target gradient in angular velocity.
-            target_davell,
-        ],
-        priority = 4,
-    )]
-    /// Runs the PID control loop for constant torque.
-    ///
-    /// Due to performance requirements this was moved in to the function to
-    /// greatly simplify the optimizations.
-    fn control_loop(mut cx: control_loop::Context) {
-        // This will miss by a few nano seconds, it is fine for our applications.
-        let start: rtic_monotonics::fugit::Instant<u64, 1, 16_000_000> = Mono::now();
-        let timer = cx.local.control_loop_timer;
-        timer.reset_event();
-
-        // Create a MOTOR_TS duration in actual time.
-        const DURATION: rtic_monotonics::fugit::Duration<u64, 1, 16000000> =
-            rtic_monotonics::fugit::Duration::<
-                u64,
-                1,
-                { controller::cart::constants::MOTOR_TIMESCALE as u32 },
-            >::from_ticks(controller::cart::constants::MOTOR_TS as u64)
-            .convert();
-        let target = cx.shared.target_davell.lock(|t| *t);
-
-        let current = cx.shared.current.lock(|current| {
-            let ret = *current;
-            ret
-        });
-
-        let (dt, pt) = cx.shared.dvel.lock(|t| *t);
-        let dt = dt as f32 / 1_000_000.;
-        const FACTOR: f32 = core::f32::consts::TAU / 86.;
-        let avel = FACTOR / dt;
-
-        // Control system.
-        let dt = pt as f32 / 1_000_000.;
-        let prev = *cx.local.previous_avel;
-        *cx.local.previous_avel = avel;
-        let mut dvel = (avel - prev) / dt;
-
-        // Remove undefined operations from the pid equations.
-        // If the value is unbounded simply floor it to zero.
-        if dvel.is_nan() || dvel.is_infinite() {
-            dvel = 0.;
-        }
-        //defmt::info!("Current : {:?}",current);
-        // PID constants. These are defined here simply to be more readable.
-        //let KP: f32 = 1000.;
-        //defmt::info!("Current : {}", current);
-        const KP: f32 = 200.;
-        const KI: f32 = 300.;
-        const KD: f32 = 0.1; //-0.5;
-
-        // Delta current from the previous iteration.
-        let del = current - *cx.local.current;
-
-        // TODO: Remove this ful-hack if at all possible.
-        *cx.local.current = current;
-
-        // Actual PID calculations.
-        // These should not need a lot of modifications.
-        let err = target - current;
-
-        let p = (KP * err).clamp(-100., 100.);
-        let i = (*cx.local.prev + err / 2.) * (DURATION.to_micros() as f32 / 1_000_000.);
-        *cx.local.integral = (*cx.local.integral + i).clamp(-100., 100.);
-        let i = KD * *cx.local.integral;
-        let d = KD
-            * ((err - *cx.local.prev) / (DURATION.to_micros() as f32 / 1_000_000.))
-                .clamp(-100., 100.);
-        *cx.local.prev = err;
-
-        let actuation = p + i + d;
-
-        // Ensure that we get a percentage.
-        const MIN_DUTY: f32 = -1.0;
-        const MAX_DUTY: f32 = 0.95;
-        const RANGE: f32 = MAX_DUTY - MIN_DUTY;
-        let actuation = (((actuation + 150.) * RANGE) / 300.) + MIN_DUTY;
-        let actuation = actuation.clamp(-1., 1.);
-        //defmt::info!("ACTUATION : {:?},err : {:?}, current : {:?}", actuation, err,
-        // current);
-        cx.shared.duty.lock(|duty| *duty = actuation);
-
-        // Compute this once, no need to spend cycles on this.
-        const RTC_DURATION: rtic_monotonics::fugit::Duration<u64, 1, 16_000_000> =
-            rtic_monotonics::fugit::Duration::<
-                u64,
-                1,
-                { controller::cart::constants::MOTOR_TIMESCALE as u32 },
-            >::from_ticks(controller::cart::constants::MOTOR_TS as u64)
-            .convert();
-        *cx.local.loop_counter = cx.local.loop_counter.wrapping_add(1);
-        let time = unsafe {
-            (start + RTC_DURATION)
-                .checked_duration_since(Mono::now())
-                .unwrap_unchecked()
-        };
-
-        // Wait until the next control loop iteration.
-        timer.timeout(time);
-
-        if *cx.local.loop_counter % 3 == 0 {
-            let element = controller::util::ControlLog::new(
-                current,
-                avel,
-                dvel,
-                start.duration_since_epoch().to_micros(),
-                target,
-            );
-            unsafe { controller::util::DATA.write(element) };
-        }
-    }
-
-    #[task(binds = PWM0, shared=[current_sense], priority = 3)]
-    fn start_sample(mut cx: start_sample::Context) {
-        cx.shared.current_sense.lock(|sense| {
-            sense.start_sample();
-        });
-
-        // Disable interrupts until next time.
-        nrf52840_hal::pac::NVIC::mask(nrf52840_hal::pac::interrupt::PWM0);
-    }
-
-    // TODO: make this have a higher priority if we ever use it. As is, it will
-    // never run.
-    //
-    // TODO: Make current_sense shared and sync the start_sample with the pwm
-    // generator. This needs some form of rate limiting, we could disable the
-    // pwm interrupt in the ISR and enable it in the motor driver, so if the
-    // phase pattern changes we sample it once. for this we need the period of a
-    // single pwm wave and ensure that we sample this. Or rather give ourself a
-    // bit of a grace period on both edges.
-    #[task(binds = SAADC, shared = [current,current_sense], priority=3)]
-    /// Continuously samples the current.
-    fn current_sense(mut cx: current_sense::Context) {
-        let sample = cx
-            .shared
-            .current_sense
-            .lock(|sense| sense.complete_sample());
-
-        cx.shared.current.lock(|target| {
-            *target = (sample[3] + *target) / 2.;
-        });
     }
 }

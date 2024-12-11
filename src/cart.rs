@@ -16,13 +16,13 @@ pub mod constants {
     pub const PWM_MAX: i32 = 32767;
 
     /// The Proportional gain for the motor.
-    pub const MOTOR_KP: i32 = 1000;
+    pub const KP: f32 = 200.;
 
     /// The Integral gain for the motor.
-    pub const MOTOR_KI: i32 = 250;
+    pub const KI: f32 = 300.;
 
     /// The derivative gain for the motor.
-    pub const MOTOR_KD: i32 = 5;
+    pub const KD: f32 = 0.1; //-0.5;
 
     /// Motor sample time in the [`MOTOR_TIMESCALE`] time-frame.
     pub const MOTOR_TS: u32 = 5_000;
@@ -34,4 +34,20 @@ pub mod constants {
     ///
     /// So each KP,KI,KD is divided by this.
     pub const MOTOR_FIXED_POINT: u32 = 3;
+
+    /// Create a [`MOTOR_TS`] duration in actual time.
+    pub const DURATION: rtic_monotonics::fugit::Duration<u64, 1, 16_000_000> =
+        rtic_monotonics::fugit::Duration::<u64, 1, { MOTOR_TIMESCALE as u32 }>::from_ticks(
+            MOTOR_TS as u64,
+        )
+        .convert();
+
+    /// The minimum duty permitted as output form the PID controller.
+    pub const MIN_DUTY: f32 = -1.0;
+
+    /// The maximum duty permitted as output form the PID controller.
+    pub const MAX_DUTY: f32 = 0.95;
+
+    /// The range of values permitted as output from the PID controller.
+    pub const RANGE: f32 = MAX_DUTY - MIN_DUTY;
 }

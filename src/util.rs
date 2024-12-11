@@ -15,6 +15,7 @@ pub struct ControlLog {
 }
 
 impl ControlLog {
+    #[must_use]
     /// Creates a new controller log.
     pub const fn new(
         current: f32,
@@ -72,6 +73,8 @@ impl<const N: usize> Data<N> {
     }
 
     /// Gets the n latest control logs as can messages.
+    #[allow(clippy::cast_precision_loss,clippy::cast_sign_loss,clippy::cast_possible_truncation)]
+    #[must_use]
     pub fn get_n_latest<const DEQUEUE: usize>(&self) -> lib::protocol::sender::Sender<DEQUEUE> {
         let data = self.buffer.borrow_data();
         let mut queue = lib::protocol::sender::Sender::new();

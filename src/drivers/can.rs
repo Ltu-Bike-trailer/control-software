@@ -1456,6 +1456,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin> Mcp2515Driver<SPI, PIN> {
     /// Will panic if reading the `CANINTF` register fails.
     pub fn interrupt_is_cleared(&mut self) -> bool {
         const ZERO: u8 = 0u8;
+
         let canintf = self.read_register(MCP2515Register::CANINTF, 0x00).unwrap();
         canintf == ZERO
     }

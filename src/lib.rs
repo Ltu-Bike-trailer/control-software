@@ -78,7 +78,7 @@ impl<T: Sized + Clone + Default, const N: usize> RingBuffer<T, N> {
     }
 
     /// Borrows the underlying data.
-    pub const fn borrow_data<'a>(&'a self) -> &'a [T] {
+    pub const fn borrow_data(&self) -> &[T] {
         &self.data
     }
 

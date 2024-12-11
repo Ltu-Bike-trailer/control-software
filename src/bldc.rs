@@ -171,13 +171,13 @@ impl Pattern {
     }
 
     /// Returns a u8 representation of the pattern.
-    #[inline(never)]
-    #[unsafe(no_mangle)]
+    #[inline(always)]
+    #[must_use]
     pub fn get_u8(self, duty: f32) -> u8 {
         if duty >= 0. {
             return self.0;
         }
-        0b010101
+        0b01_01_01
     }
 
     #[must_use]
