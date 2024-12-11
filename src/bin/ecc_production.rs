@@ -39,7 +39,7 @@ mod etc {
     };
     use embedded_can::blocking::Can;
     use esc::{self, events::GpioEvents, PinConfig};
-    use lib::protocol::{self, message::CanMessage, MessageType, MotorSubSystem, WriteType};
+    use lib::protocol::{self, message::CanMessage, MessageType, WriteType};
     use nrf52840_hal::{
         gpio::{p1::P1_08, Input, Output, Pin, PullUp, PushPull},
         pac::{PWM0, PWM1, PWM2, SPI0, TIMER3},
@@ -318,27 +318,39 @@ mod etc {
         }
     }
 
-    #[task(local = [can,can_event_receiver], shared = [duty], priority = 3)]
+    #[task(local = [can,can_event_receiver], shared = [target_davell], priority = 3)]
     /// Manages CAN messages.
     async fn can(mut cx: can::Context) {
+        let mut queue = lib::protocol::sender::Sender::new();
         while let Ok(message) = cx.local.can_event_receiver.recv().await {
             if message.is_none() {
-                let event_code = match cx.local.can.interrupt_decode() {
-                    Ok(code) => code,
-                    // We do not have time for recovery here
-                    Err(_) => continue,
-                };
-                if let Some(message) = cx.local.can.handle_interrupt(event_code) {
-                    let de: MessageType = match MessageType::try_from(&message) {
-                        Ok(val) => val,
+                while !cx.local.can.interrupt_is_cleared() {
+                    let event_code = match cx.local.can.interrupt_decode() {
+                        Ok(code) => code,
+                        // We do not have time for recovery here
                         Err(_) => continue,
                     };
-                    let reference = match de {
-                        MessageType::Write(WriteType::Motor(MotorSubSystem::Left(msg))) => msg,
-                        MessageType::Write(WriteType::Motor(MotorSubSystem::Right(msg))) => msg,
-                        _ => continue,
-                    };
-                    cx.shared.duty.lock(|duty| *duty = reference);
+                    if let Some(message) = cx.local.can.handle_interrupt(event_code) {
+                        let de: MessageType = match MessageType::try_from(&message) {
+                            Ok(val) => val,
+                            Err(_) => continue,
+                        };
+                        let (deadline, target) = match de {
+                            MessageType::Write(WriteType::MotorReference { deadline, target }) => {
+                                (Mono::now() + deadline.micros(), target)
+                            }
+                            _ => continue,
+                        };
+                        cx.shared.target_davell.lock(|duty| *duty = target);
+                    }
+                }
+                if let Some(msg) = queue.dequeue() {
+                    // It is totally fine if this fails here.
+                    let _ = cx.local.can.transmit(&msg);
+                } else {
+                    // Grabs the 10 latest control messages from the buffer. This is safe since we
+                    // will never collide with an ongoing write.
+                    queue = unsafe { controller::util::DATA.get_n_latest::<10>() };
                 }
 
                 continue;
@@ -348,71 +360,6 @@ mod etc {
             let _ = cx.local.can.transmit(&message);
         }
     }
-
-    #[derive(Debug, Clone, Default)]
-    struct Element {
-        current: f32,
-        angular_acceleration: f32,
-        angular_velocity: f32,
-        time: u64,
-        reference: f32,
-    }
-
-    impl Element {
-        const fn new(
-            current: f32,
-            angular_acceleration: f32,
-            angular_velocity: f32,
-            time: u64,
-            reference: f32,
-        ) -> Self {
-            Self {
-                current,
-                angular_acceleration,
-                angular_velocity,
-                time,
-                reference,
-            }
-        }
-
-        const fn null() -> Self {
-            Self::new(0., 0., 0., 0, 0.)
-        }
-    }
-    impl defmt::Format for Element {
-        fn format(&self, fmt: defmt::Formatter) {
-            // Format as hexadecimal.
-            defmt::write!(fmt, "\"global_current\",\"{}\",\"angular_velocity\",\"{}\",\"angular_acceleration\",\"{}\",\"target\",\"{}\",\"time\",\"{}\";",self.current,self.angular_velocity,self.angular_acceleration,self.reference,self.time);
-        }
-    }
-
-    struct Data<const N: usize> {
-        pub buffer: RingBuffer<Element, N>,
-    }
-
-    impl<const N: usize> defmt::Format for Data<N> {
-        fn format(&self, fmt: defmt::Formatter) {
-            defmt::write!(fmt, "\n");
-            defmt::info!("Writing buffer");
-            for node in self.buffer.borrow_data() {
-                defmt::write!(fmt, "{:?}\n", node);
-            }
-        }
-    }
-    impl<const N: usize> Data<N> {
-        const fn null() -> Self {
-            Self {
-                buffer: RingBuffer::new([const { Element::null() }; N]),
-            }
-        }
-
-        fn write(&mut self, data: Element) {
-            self.buffer.assign_next(data);
-        }
-    }
-
-    #[link_section = "FLASH"]
-    static mut DATA: Data<1_000> = Data::null();
     //static mut QUEUE: [];
 
     const fn field_extract<const N: usize, const VAL: usize>() -> usize {
@@ -711,37 +658,18 @@ mod etc {
                 .unwrap_unchecked()
         };
 
-        if Mono::now().duration_since_epoch().to_secs() % 10 == 0 {
-            let phase1: Pwm<PWM0> = unsafe { (0x0 as *mut Pwm<PWM0>).read() };
-            let phase2: Pwm<PWM1> = unsafe { (0x0 as *mut Pwm<PWM1>).read() };
-            let phase3: Pwm<PWM2> = unsafe { (0x0 as *mut Pwm<PWM2>).read() };
-            phase1.set_duty(0.);
-            phase2.set_duty(0.);
-            phase3.set_duty(0.);
-
-            for node in unsafe { DATA.buffer.borrow_data() } {
-                defmt::info!("{:?}\n", node);
-                cx.shared.duty.lock(|duty| *duty = *duty * 0.99);
-            }
-            cx.shared.target_davell.lock(|t| {
-                let next = cx.local.buffer.next().unwrap();
-                defmt::info!("Target : {:?}", next);
-                *t = next
-            });
-        }
-
         // Wait until the next control loop iteration.
         timer.timeout(time);
 
         if *cx.local.loop_counter % 3 == 0 {
-            let element = Element::new(
+            let element = controller::util::ControlLog::new(
                 current,
                 avel,
                 dvel,
                 start.duration_since_epoch().to_micros(),
                 target,
             );
-            unsafe { DATA.write(element) };
+            unsafe { controller::util::DATA.write(element) };
         }
     }
 

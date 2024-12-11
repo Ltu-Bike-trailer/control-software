@@ -1433,23 +1433,15 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin> Mcp2515Driver<SPI, PIN> {
                 self.active_rx = (Some(RXBN::RXB0), true);
                 let mut frame = self.receive().unwrap();
 
-                let high_prio_id = StandardId::new(0x0).unwrap();
-                let id_high_prio = Id::Standard(high_prio_id);
-                let mut frame_response = CanMessage::new(id_high_prio, frame.data()).unwrap();
-
                 //self.transmit(&frame_response);
                 self.clear_interrupt_flag(0);
-
-                let canintff = self.read_register(MCP2515Register::CANINTF, 0x00).unwrap();
-                defmt::println!("CANINTF register bits after handle: {:08b}", canintff);
+                Some(frame)
             }
             InterruptFlagCode::RXB1Interrupt => {
                 defmt::println!("RXB1 received a message!");
                 self.active_rx = (Some(RXBN::RXB1), true);
                 let mut frame = self.receive().unwrap();
-                let data_str: &str = core::str::from_utf8(frame.data()).unwrap();
 
-                //self.transmit(&frame_response);
                 self.clear_interrupt_flag(1);
                 Some(frame)
             }

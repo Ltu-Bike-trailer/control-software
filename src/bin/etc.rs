@@ -124,7 +124,7 @@ mod etc {
         let (pins, p1) = pins.configure_p1();
         let (pins, p2) = pins.configure_p2();
         let (pins, p3) = pins.configure_p3();
-        
+
         defmt::info!("Phases done");
         let (pins, current_sense) = pins.configure_adc(cx.device.SAADC);
 
@@ -198,7 +198,7 @@ mod etc {
         let (can_event_sender, can_event_receiver) =
             rtic_sync::make_channel!(Option<CanMessage>, 10);
         let (can_receive_sender, can_receive_receiver) = rtic_sync::make_channel!(CanMessage, 10);
-        
+
         defmt::info!("Init done :)");
         (
             Shared {
