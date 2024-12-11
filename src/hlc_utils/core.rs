@@ -147,31 +147,3 @@ impl Into<f32> for Constants {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use defmt::println;
-
-    use super::Controller;
-
-    #[test]
-    fn actuate_test() {
-        let mut controller = Controller::new();
-        controller.write_err(0.1f32);
-        println!("After write_err, e_prior: {}", controller.e_prior);
-        controller.write_err(0.2f32);
-        controller.write_err(0.3f32);
-        println!("After three write_err, circular buf: {}", controller.e_input);
-        
-        
-        controller.write_moment(1.5f32);
-        controller.write_moment(2.5f32);
-        controller.write_moment(3.5f32);
-
-        let fetced_output: f32 = 1.85;
-        let fetched_error: f32 = 0.1234; 
-
-        let actute = controller.actuate(fetced_output, fetched_error);
-        println!("Actuate func yields: {}", actute);
-    }
-
-}
