@@ -66,12 +66,13 @@ impl Controller {
     /// Where T(k) is output from controller as moment.
     /// While e(k) is the force insignal to the controller (loadcells).
     pub fn actuate(&mut self, output: f32, error: f32) -> Option<f32> {
-        let ek1 = self.get_err::<1>();
-        let ek2 = self.get_err::<2>();
-        let ek3 = self.get_err::<3>();
-        let tk1 = self.get_moment::<1>();
-        let tk2 = self.get_moment::<2>();
-        let tk3 = self.get_moment::<3>();
+        let ek2 = self.get_err::<1>(); // Second Newest value here.
+        let ek3 = self.get_err::<2>(); // Oldest value in buffer here.
+        let ek1 = self.get_err::<3>(); // Newest value here.
+        
+        let tk2 = self.get_moment::<1>();
+        let tk3 = self.get_moment::<2>();
+        let tk1 = self.get_moment::<3>();
         
         let a = (Constants::A1, Constants::A2, Constants::A3);
         let b = (Constants::B1, Constants::B2, Constants::B3);
