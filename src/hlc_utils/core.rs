@@ -45,6 +45,13 @@ pub struct Controller {
 }
 
 impl Controller {
+  
+    /// controller output constants. 
+    pub const A: (f32, f32, f32) = (1.271, 0.0289, 0.01832);
+    /// Input constants for controller. 
+    pub const B: (f32, f32, f32) = (0.3248, 0.4279, 0.1309);
+
+
     #[inline(always)]
     /// Creates a new controller instance with lagged values
     /// for output and input (memory).
@@ -66,19 +73,10 @@ impl Controller {
     /// Where T(k) is output from controller as moment.
     /// While e(k) is the force insignal to the controller (loadcells).
     pub fn actuate(&mut self, output: f32, error: f32) -> Option<f32> {
-        let ek2 = self.get_err::<1>(); // Second Newest value here.
-        let ek3 = self.get_err::<2>(); // Oldest value in buffer here.
-        let ek1 = self.get_err::<3>(); // Newest value here.
+        // self.get_err::<3> is the newest value, and oldest value is self.get_err::<2>. 
+        let ek: (f32, f32, f32) = (self.get_err::<3>(), self.get_err::<1>(), self.get_err::<2>()); 
+        let tk: (f32, f32, f32) = (self.get_moment::<3>(),  self.get_moment::<1>(), self.get_moment::<2>());
         
-        let tk2 = self.get_moment::<1>();
-        let tk3 = self.get_moment::<2>();
-        let tk1 = self.get_moment::<3>();
-        
-        let a = (Constants::A1, Constants::A2, Constants::A3);
-        let b = (Constants::B1, Constants::B2, Constants::B3);
-        let a: (f32, f32, f32) = (a.0.into(), a.1.into(), a.2.into());
-        let b: (f32, f32, f32) = (b.0.into(), b.1.into(), b.2.into());
-
         let not_ready_e = self.e_input.into_iter().any(|val| val == 0f32);
         let not_ready_t = self.t_output.into_iter().any(|val| val == 0f32);
         
@@ -89,8 +87,8 @@ impl Controller {
             // Do nothing wait for all data to be present. 
             return None;
         } else {
-            let actuate = a.0 * tk1 - a.1 * tk2 + a.2 * tk3 + b.0 * ek1 - b.1 * ek2 + b.2 * ek3;
-            return Some(actuate); 
+            return Some(Self::A.0 * tk.0 - Self::A.1 * tk.1 + Self::A.2 * tk.2 + Self::B.0 * ek.0 - Self::B.1 * ek.1 + Self::B.2 * ek.2);
+            
         }
     }
 
