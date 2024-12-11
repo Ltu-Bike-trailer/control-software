@@ -18,7 +18,7 @@ mod hlc {
     use controller::{
         boards::*,
         drivers::hx711::{Gain, Hx711Driver, ValidTimings},
-        hlc_utils::stype_calibration::*,
+        hlc_utils::{stype_calibration::*, core::*, config::*, events::*},
     };
     use cortex_m::asm;
     use defmt::Debug2Format;
@@ -93,10 +93,13 @@ mod hlc {
             miso: Some(port0.p0_28.into_floating_input().degrade()),
         };
 
+        //let mut can_manager = CanManager::new(port0, port1);
+        //let (cs_pin, int_pin, spi, gpiote) = can_manager.peripheral_instances(device.SPI0, device.GPIOTE);
+
         let cs_pin = port1.p1_02.into_push_pull_output(Level::High).degrade();
         let can_interrupt = port1.p1_15.into_pullup_input().degrade();
 
-        let mut spi = Spi::new(device.SPI0, pins, Frequency::K125, MODE_0);
+        let mut spi = Spi::new(device.SPI0, pins, Frequency::M1, MODE_0);
         let mut gpiote = Gpiote::new(device.GPIOTE);
 
         const CLKEN: bool = true;
