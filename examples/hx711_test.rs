@@ -2,7 +2,11 @@
 #![no_main]
 #![allow(unused)]
 #![feature(generic_arg_infer)]
+<<<<<<< HEAD
 use can_mcp2515::drivers::can::*;
+=======
+use can_mcp2515::drivers::can::{Mcp2515Driver, Mcp2515Settings};
+>>>>>>> 522b09b (Esc v2 merge (#35))
 use controller as _;
 use controller::drivers::hx711::*;
 use cortex_m::asm as _;
@@ -18,7 +22,22 @@ nrf_rtc0_monotonic!(Mono);
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC1])]
 mod app {
 
+<<<<<<< HEAD
     use can_mcp2515::drivers::can::*;
+=======
+    use can_mcp2515::drivers::can::{
+        AcceptanceFilterMask,
+        Bitrate,
+        Mcp2515Driver,
+        Mcp2515Settings,
+        McpClock,
+        OperationTypes,
+        ReceiveBufferMode,
+        SettingsCanCtrl,
+        CLKPRE,
+        RXBN,
+    };
+>>>>>>> 522b09b (Esc v2 merge (#35))
     use controller::{boards::*, drivers::hx711::*};
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};
@@ -49,7 +68,7 @@ mod app {
 
     #[local]
     struct Local {
-        hx711: Hx711Driver<Pin<Output<PushPull>>, Pin<Input<Floating>>>,
+        hx711: Driver<Pin<Output<PushPull>>, Pin<Input<Floating>>>,
     }
 
     #[init]
@@ -81,7 +100,7 @@ mod app {
         let (t1_val, t2_val, t3_val, t4_val) = (100u64, 10u64, 300u64, 300u64); // Alt.
         let applied_timing = ValidTimings::new(t1_val, t2_val, t3_val, t4_val); // Alt.
 
-        let mut hx711_instance = Hx711Driver::init(pd_sck, dout_pin, Gain::Apply128, timing_delays);
+        let mut hx711_instance = Driver::init(pd_sck, dout_pin, Gain::Apply128, timing_delays);
 
         gpiote
             .channel0()
@@ -126,7 +145,7 @@ mod app {
 
     #[task(binds = GPIOTE, shared = [gpiote])]
     fn data_interrupt(mut cx: data_interrupt::Context) {
-        let handle = cx.shared.gpiote.lock(|gpiote| {
+        cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
                 defmt::info!("Analog data received!");
                 read_data::spawn();

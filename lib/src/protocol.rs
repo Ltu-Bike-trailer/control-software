@@ -6,12 +6,11 @@ pub mod constants;
 //pub mod message;
 pub mod sender;
 
+use can_mcp2515::drivers::message;
 #[allow(clippy::enum_glob_use)]
 use constants::{InvalidMessageId, Message::*};
 use embedded_can::{Frame, Id};
-//use message::CanMessage;
 use can_mcp2515::drivers::message::CanMessage;
-
 
 /// Denotes all of the supported message types.
 #[derive(Clone, Debug)]
@@ -36,6 +35,14 @@ pub enum WriteType {
     Sensor(SensorSubSystem),
     /// The message relates to motor subsystem.
     Motor(MotorSubSystem),
+    /// Sets the control reference for both of the motors.
+    MotorReference {
+        /// The target value for the motor to achieve.
+        target: f32,
+        /// The time the motor should hold this reference value after which it
+        /// returns to 0.
+        deadline: u32,
+    },
 }
 
 /// Denotes a log for a specific subsystem.
@@ -45,6 +52,17 @@ pub enum FixedLogType {
     BatteryStatus(BatteryStatus),
     /// The velocity of that given motor subsystem.
     Velocity(VelocityInfo),
+    /// Logs the current torque for the motor.
+    Torque(TorqueInfo),
+}
+
+/// The torque on a specific motor.
+#[derive(Clone, PartialEq, Debug)]
+pub struct TorqueInfo {
+    /// The current acceleration
+    pub acceleration: f32,
+    /// The current velocity
+    pub velocity: u16,
 }
 
 /// The velocity of the given motor.
@@ -173,6 +191,20 @@ impl Into<CanMessage> for WriteType {
         match self {
             Self::Motor(m) => m.into(),
             Self::Sensor(s) => s.into(),
+            Self::MotorReference { target, deadline } => {
+                let mut data = [0u8; 8];
+                let output = target.to_le_bytes();
+                data[0] = output[0];
+                data[1] = output[1];
+                data[2] = output[2];
+                data[3] = output[3];
+                let output = deadline.to_le_bytes();
+                data[4] = output[0];
+                data[5] = output[1];
+                data[6] = output[2];
+                data[7] = output[3];
+                unsafe { CanMessage::new(SetMotorReference, &data).unwrap_unchecked() }
+            }
         }
     }
 }
@@ -345,6 +377,22 @@ impl From<FixedLogType> for CanMessage {
             FixedLogType::Velocity(VelocityInfo(MotorSubSystem::Right(val))) => {
                 Self::new(MotorDiagRight, &val.to_le_bytes()).expect("Invalid parser")
             }
+            FixedLogType::Torque(TorqueInfo {
+                acceleration,
+                velocity,
+            }) => {
+                let mut buffer = [0u8; 8];
+                let data = acceleration.to_le_bytes();
+                let data2 = velocity.to_le_bytes();
+                buffer[0] = data[0];
+                buffer[1] = data[2];
+                buffer[2] = data[2];
+                buffer[3] = data[3];
+                buffer[4] = data2[0];
+                buffer[5] = data2[1];
+
+                Self::new(MotorDiagRight, &buffer).expect("Invalid parser")
+            }
         }
     }
 }
@@ -409,10 +457,10 @@ impl TryFrom<&CanMessage> for MessageType {
         Ok(match value.id() {
             Id::Standard(id) => match id.try_into()? {
                 LeftMotor | RightMotor | SensorAlpha | SensorTheta | SensorLBed | SensorLFront
-                | SensorCurrentLeft | SensorCurrentRight => {
+                | SensorCurrentLeft | SensorCurrentRight | SetMotorReference => {
                     Self::Write(WriteType::try_from(value)?)
                 }
-                MotorDiagLeft | MotorDiagRight | BatteryDiag => {
+                MotorDiagLeft | MotorDiagRight | BatteryDiag | TorqueDiag => {
                     Self::FixedLog(FixedLogType::try_from(value)?)
                 }
             },
@@ -483,9 +531,17 @@ impl Ord for MessageType {
             | (Self::FixedLog(_), Self::FixedLog(_)) => core::cmp::Ordering::Equal,
             (Self::Write(WriteType::Sensor(_)), Self::Write(WriteType::Motor(_)))
             | (Self::FixedLog(_), _) => core::cmp::Ordering::Less,
-            (Self::Write(WriteType::Sensor(_) | WriteType::Motor(_)), _) => {
-                core::cmp::Ordering::Greater
-            }
+            (
+                Self::Write(
+                    WriteType::Sensor(_)
+                    | WriteType::Motor(_)
+                    | WriteType::MotorReference {
+                        target: _,
+                        deadline: _,
+                    },
+                ),
+                _,
+            ) => core::cmp::Ordering::Greater,
         }
     }
 }

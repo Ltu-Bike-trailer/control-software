@@ -20,8 +20,8 @@ use super::{BatteryStatus, CanMessage, MessageType, MotorSubSystem, VelocityInfo
 /// use lib::protocol::{
 ///     MessageType,
 ///     sender::Sender,
-///     //message::CanMessage
 /// };
+/// use can_mcp2515::drivers::message::CanMessage;
 ///
 /// let mut buffer = Sender::<10>::new();
 ///
@@ -60,8 +60,8 @@ use super::{BatteryStatus, CanMessage, MessageType, MotorSubSystem, VelocityInfo
 ///     SensorSubSystem,
 ///     VelocityInfo,
 ///     WriteType,
-///     message::CanMessage
 /// };
+/// use can_mcp2515::drivers::message::CanMessage;
 ///
 /// let to_test = [
 ///     MessageType::FixedLog(FixedLogType::BatteryStatus(BatteryStatus(129.))),

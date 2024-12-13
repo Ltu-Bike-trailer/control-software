@@ -25,7 +25,7 @@ use rtic_monotonics::{
 };
 
 /// Hx711 driver struct.
-pub struct Hx711Driver<PINOUT: OutputPin + Send, PININ: InputPin + Send> {
+pub struct Driver<PINOUT: OutputPin + Send, PININ: InputPin + Send> {
     /// Clock pin, for `Power down control (high active) and serial clock
     /// input`.
     pub pd_sck: PINOUT,
@@ -162,7 +162,7 @@ impl From<Gain> for u8 {
     }
 }
 
-impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Hx711Driver<PINOUT, PININ> {
+impl<PINOUT: OutputPin + Send, PININ: InputPin + Send> Driver<PINOUT, PININ> {
     /// This is just a placeholder or constant for the calibration parameter.
     ///
     /// #NOTE

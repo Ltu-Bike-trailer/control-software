@@ -17,23 +17,25 @@ nrf_rtc0_monotonic!(Mono);
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC0])]
 mod app {
 
-    use can_mcp2515::drivers::can::{
-        AcceptanceFilterMask,
-        Bitrate,
-        Mcp2515Driver,
-        Mcp2515Settings,
-        McpClock,
-        OperationTypes,
-        ReceiveBufferMode,
-        SettingsCanCtrl,
-        CLKPRE,
-        RXBN,
+    use can_mcp2515::drivers::{
+        can::{
+            AcceptanceFilterMask,
+            Bitrate,
+            Mcp2515Driver,
+            Mcp2515Settings,
+            McpClock,
+            OperationTypes,
+            ReceiveBufferMode,
+            SettingsCanCtrl,
+            CLKPRE,
+            RXBN,
+        },
+        message::CanMessage,
     };
     use controller::boards::*;
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};
     use embedded_hal::{digital::OutputPin, spi::SpiBus};
-    use lib::protocol::sender::Sender;
     use nrf52840_hal::{
         gpio::{self, Floating, Input, Level, Output, Pin, Port, PullUp, PushPull},
         gpiote::{Gpiote, GpioteInputPin},
@@ -43,7 +45,6 @@ mod app {
         spim::*,
         Clocks,
     };
-
     #[shared]
     struct Shared {
         gpiote: Gpiote,
@@ -53,7 +54,6 @@ mod app {
     struct Local {
         candriver: Mcp2515Driver<Spi<SPI0>, Pin<Output<PushPull>>, Pin<Input<PullUp>>>,
         candriver_node: Mcp2515Driver<Spi<SPI2>, Pin<Output<PushPull>>, Pin<Input<PullUp>>>,
-        sender: Sender<10>,
     }
 
     #[init]
@@ -101,8 +101,8 @@ mod app {
         let cs_node_pin = port1.p1_08.into_push_pull_output(Level::High).degrade();
         let can_node_interrupt = port1.p1_07.into_pullup_input().degrade();
 
-        let mut spi = Spi::new(device.SPI0, pins, Frequency::K125, MODE_0);
-        let mut spi_node = Spi::new(device.SPI2, pins_node, Frequency::K125, MODE_0);
+        let mut spi = Spi::new(device.SPI0, pins, Frequency::M1, MODE_0);
+        let mut spi_node = Spi::new(device.SPI2, pins_node, Frequency::M1, MODE_0);
         let mut gpiote = Gpiote::new(device.GPIOTE);
 
         let dummy_data = "dummy".as_bytes();
@@ -114,9 +114,8 @@ mod app {
         const ABAT: bool = false;
 
         const MASK_RXN: u16 = 0b1111_1111_1110_0000;
-        const FILTER_RX0: u16 = 0x0;
-        const FILTER_RX1: u16 = 0x1;
-        const DEFAULT_FILTER_MASK: u16 = Mcp2515Settings::DEFAULT_FILTER_MASK;
+        const FILTER_RX0: u16 = 0x1;
+        const FILTER_RX1: u16 = 0x2;
 
         let canctrl_settings = SettingsCanCtrl::new(
             OperationTypes::Configuration,
@@ -132,8 +131,8 @@ mod app {
             Bitrate::CAN125,
             0u8,
             ReceiveBufferMode::OnlyStandardId,
-            AcceptanceFilterMask::new(DEFAULT_FILTER_MASK, DEFAULT_FILTER_MASK),
-            AcceptanceFilterMask::new(DEFAULT_FILTER_MASK, DEFAULT_FILTER_MASK),
+            AcceptanceFilterMask::new(MASK_RXN, FILTER_RX0),
+            AcceptanceFilterMask::new(MASK_RXN, FILTER_RX1),
         );
 
         let mut can_driver = Mcp2515Driver::init(spi, cs_pin, can_interrupt, can_settings);
@@ -155,25 +154,16 @@ mod app {
         defmt::println!("After initializing Spi<SPI1>...");
         let dummy_id = StandardId::new(0x2).unwrap();
         defmt::info!("dummy_data: {:?}", dummy_data.len());
-
-        let mut sender = Sender::new();
-        sender.set_left_motor(1.0).unwrap();
-        let mut msg = sender.dequeue().unwrap();
-        msg.print_frame();
-        can_driver.transmit(&msg);
-
-        //let mut frame =
-        //   CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02,
-        // 0x03]).unwrap();
+        let mut frame =
+            CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02, 0x03]).unwrap();
 
         //can_driver.loopback_test(frame);
-        //can_driver.transmit(&frame);
+        can_driver.transmit(&frame);
         //can_node.transmit(&frame);
         //can_node.loopback_test(frame);
         (Shared { gpiote }, Local {
             candriver: can_driver,
             candriver_node: can_node,
-            sender,
         })
     }
 
@@ -186,10 +176,8 @@ mod app {
         }
     }
 
-    #[task(binds = GPIOTE, shared = [gpiote], local = [candriver, candriver_node, sender])]
+    #[task(binds = GPIOTE, shared = [gpiote], local = [candriver, candriver_node, counter: u16 = 0])]
     fn can_interrupt(mut cx: can_interrupt::Context) {
-        //let can_interrupt::LocalResources {candriver, ..} = cx.local;
-
         cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
                 defmt::println!("\n");

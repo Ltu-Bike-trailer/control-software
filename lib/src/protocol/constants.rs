@@ -16,6 +16,10 @@ pub enum Message {
 
     /// Represents a write of the left motor state.
     RightMotor = 1,
+
+    /// Represents a write of the motor reference values.
+    SetMotorReference = 2,
+
     /// Represents a write of theta sensor value.
     SensorTheta = 10,
     /// Represents a write of alpha sensor value.
@@ -37,6 +41,8 @@ pub enum Message {
     ///
     /// The value paired with this is a f32 representing the velocity.
     MotorDiagRight = 40,
+    /// Represents a status status diagnostic message from one of the motors.
+    TorqueDiag = 41,
     /// Represents a status message from the battery.
     ///
     /// The value paired with this is a f32 representing the battery voltage.
