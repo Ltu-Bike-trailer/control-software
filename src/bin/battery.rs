@@ -5,20 +5,12 @@
 #![deny(warnings)]
 #![feature(generic_arg_infer)]
 
-// optimization errors 
-#![allow(dead_code)]
-#![allow(unused_assignments)]
-#![allow(unused_mut)]
-#![allow(unused_imports)]
 
 use controller as _; // global logger + panicking-behavior + memory layout
 
 
 #[rtic::app(
-    // TODO: Replace `some_hal::pac` with the path to the PAC
     device = nrf52840_hal::pac,
-    // TODO: Replace the `FreeInterrupt1, ...` with free interrupt vectors if software tasks are used
-    // You can usually find the names of the interrupt vectors in the some_hal::pac::interrupt enum.
     dispatchers = [RTC0]
 )]
 
@@ -32,7 +24,7 @@ mod app {
     use embedded_can::blocking::Can;
 
     use lib::protocol::sender::Sender;
-    use nrf52840_hal::{self as hal, gpio::*, gpiote::Gpiote, pac::{saadc, SPI0}, saadc::{Gain, Oversample, Reference, Resistor, Resolution, SaadcConfig, Time}, spi::{Frequency, Spi}  
+    use nrf52840_hal::{self as hal, gpio::*, gpiote::Gpiote, pac::SPI0, saadc::{Gain, Oversample, Reference, Resistor, Resolution, SaadcConfig, Time}, spi::{Frequency, Spi}  
     };
     use rtic_monotonics::systick::*;
 
@@ -47,7 +39,6 @@ mod app {
     // Local resources go here
     #[local]
     struct Local {
-        curr_soc: f32,
         saadc: hal::saadc::Saadc,
         saadc_pin: p0::P0_31<Input<Floating>>,
         old_soc: f32,
@@ -63,7 +54,6 @@ mod app {
 
         // set up pins
         let port0 = hal::gpio::p0::Parts::new(device.P0);
-        //let _port1 = hal::gpio::p1::Parts::new(cx.device.P1);
 
         // setup monotonic systic for periodic interrupts 
         let sysclk = 64_000_000;
@@ -72,43 +62,37 @@ mod app {
 
         // set up saadic(Successive approximation analog-to-digital converter)
         // set up setting for sampling analog signal
-        let mut saadc_config = SaadcConfig {
-                resolution: Resolution::_14BIT,
-                oversample: Oversample::OVER256X,
-                reference: Reference::INTERNAL,
-                gain: Gain::GAIN1_6,
-                resistor: Resistor::BYPASS,
-                time: Time::_40US,
-            };
-
+        let saadc_config = SaadcConfig {
+            resolution: Resolution::_14BIT,
+            oversample: Oversample::OVER256X,
+            reference: Reference::INTERNAL,
+            gain: Gain::GAIN1_6,
+            resistor: Resistor::BYPASS,
+            time: Time::_40US,
+        };
 
         // create new saadc object
         let mut saadc = hal::saadc::Saadc::new(device.SAADC, saadc_config);
 
         // assign readable pins for saadc
-        let mut saadc_pin: p0::P0_31<Input<Floating>> = port0.p0_31.into_floating_input();
+        let saadc_pin: p0::P0_31<Input<Floating>> = port0.p0_31.into_floating_input();
         let mut saadc_pin_0: p0::P0_30<Input<Floating>> = port0.p0_30.into_floating_input();
         let mut saadc_pin_1: p0::P0_29<Input<Floating>> = port0.p0_29.into_floating_input();
         let mut saadc_pin_2: p0::P0_28<Input<Floating>> = port0.p0_28.into_floating_input();
         
         // Estimate the current state of charge in battery
-        // read analog value from P0.28 and P0.29
-
+        // read analog value from P0.28, P0.29 and P0.30
         let saadc_result_0 = saadc.read_channel(&mut saadc_pin_0).unwrap() as f32;
         let saadc_result_1 = saadc.read_channel(&mut saadc_pin_1).unwrap() as f32;
         let saadc_result_2 = saadc.read_channel(&mut saadc_pin_2).unwrap() as f32;
 
-        // convert analog values to voltage
+        // convert analog values to voltage 
         let saadc_to_volt_0 = (saadc_result_0 * 0.6)/((1<<14) as f32 * (1.0/6.0));
-        info!("saadc_to_volt {}", saadc_to_volt_0);
         let saadc_to_volt_1 = (saadc_result_1 * 0.6)/((1<<14) as f32 * (1.0/6.0));
-        info!("saacd_volt_1 {}", saadc_to_volt_1);
         let saadc_to_volt_2 = (saadc_result_2 * 0.6)/((1<<14) as f32 * (1.0/6.0));
-        info!("saadc_to_volt_2 {}", saadc_to_volt_2);
 
         // difference in voltage between P0.28 and P0.29
         let temp_volt = (saadc_to_volt_1 - saadc_to_volt_2).abs();
-        info!("temp_volt {}", temp_volt);
 
         // temperature = (-5.8151*current_voltage³ + 24.9708*current_voltage² - 61.8928*current_voltage + 48.8572)
         let temp = -5.8151*(temp_volt*temp_volt*temp_volt) + 24.9708*(temp_volt*temp_volt) - 61.8928*temp_volt + 48.8572;
@@ -116,31 +100,18 @@ mod app {
 
         // battery voltage Vm = Vb*10k/(150k+10k)
         let bat_voltage = ((saadc_to_volt_0*(150000.0+10000.0))/10000.0)+1.3;
-        info!("The battery voltage is {}", bat_voltage);
 
         // battery voltage loss by temp function (approximated from us gov study: https://www.osti.gov/servlets/purl/975252) 
         let bat_temp_ratio = 0.817 + 9.19*0.001*temp + -4.24*0.00001*temp*temp;
-        info!("The battery temperature ratio is {}", bat_temp_ratio);
 
         // voltage normailized for 25 degrees
         let norm = bat_voltage/bat_temp_ratio;
-        info!("The battery voltage normalized for 25 degrees is {}", norm);
 
-        // old soc estimation (linear estimation based on values form https://naturesgenerator.com/blogs/news/lead-acid-battery-voltage-chart?srsltid=AfmBOoqZi_WlVo8OX221jsoNeKqaDMWyDLfuOsrSwsqLOeA4DP-hocwW)
-        let mut old_soc = 0.251*norm -8.7;
-        /* 
-        Might not be needed
-        if old_soc < 0.0 {
-            old_soc = 0.0
-        }
-
-        */
+        // calculate the first state of charge
+        // State of charge estimation (linear estimation based on values form https://naturesgenerator.com/blogs/news/lead-acid-battery-voltage-chart?srsltid=AfmBOoqZi_WlVo8OX221jsoNeKqaDMWyDLfuOsrSwsqLOeA4DP-hocwW)
+        let old_soc = 0.251*norm -8.7;
         info!("Old soc: {}", old_soc);
-        // calculate the first state of charge 
-        //let old_soc: f32 =  norm/bat_loss_func;
-        //info!("The battery has {} state of charge", old_soc);
-        // set up state of charge variables
-        let curr_soc: f32 = 0.0;
+
 
         // set up CAN
         // CAN PINS
@@ -164,7 +135,6 @@ mod app {
         );
 
         // set up can setting
-        //let spi_can: Spi<SPI0> = unsafe { (0x0 as *mut Spi<SPI0>).read() };
         let settings = Mcp2515Settings::default();
         let can_driver = Mcp2515Driver::init(spi_battery, cs0, can_interrupt, settings);
 
@@ -186,7 +156,7 @@ mod app {
             },
             Local {
                 // Initialization of local resources go here
-                saadc, saadc_pin, old_soc, sender, can_driver, curr_soc
+                saadc, saadc_pin, old_soc, sender, can_driver
 
             },
         )
@@ -212,7 +182,6 @@ mod app {
         let saadc = cx.local.saadc;
         let saadc_pin = cx.local.saadc_pin;
         let old_soc = cx.local.old_soc;
-        let mut curr_soc:f32 = 0.0;
         let can_driver = cx.local.can_driver;
         let sender = cx.local.sender;
 
@@ -240,7 +209,7 @@ mod app {
         info!("test {}", i_shunt);
 
         // Calculate current state of charge(curr_soc = old_soc - (i_shunt*delta_t)/Q)
-        curr_soc = *old_soc - i_shunt/20.0 * 0.5;
+        let mut curr_soc = *old_soc - i_shunt/20.0 * 0.5;
 
         // normalize for temp variations battery state of charge
         curr_soc = curr_soc.clamp(0.0, 1.0);
