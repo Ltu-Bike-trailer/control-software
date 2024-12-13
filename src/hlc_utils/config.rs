@@ -6,32 +6,19 @@
 
 use embedded_hal::spi::MODE_0;
 use nrf52840_hal::{
-<<<<<<< HEAD
     gpio::{self, p0, p1, Floating, Input, Level, Output, Pin, PullUp, PushPull},
     gpiote::Gpiote,
-=======
-    gpio::{self, Pin, *},
-    gpiote::*,
->>>>>>> d3bcbce (rebasing with main)
     pac::GPIOTE,
     spi::{Instance, Spi},
 };
 
 /// HLC board pins for the SPI interfacing the CAN driver.
 pub struct CanSpi {
-<<<<<<< HEAD
     /// Pin for `sck`.
-=======
-    ///
->>>>>>> d3bcbce (rebasing with main)
     pub sck: Pin<Output<PushPull>>,
     /// Pin for `mosi`.
     pub mosi: Pin<Output<PushPull>>,
-<<<<<<< HEAD
     /// Pin for `miso`.
-=======
-    ///
->>>>>>> d3bcbce (rebasing with main)
     pub miso: Pin<Input<Floating>>,
 }
 
@@ -44,10 +31,7 @@ pub struct CanManager {
 
 impl CanManager {
     /// Creates and return the Can pin mapping
-<<<<<<< HEAD
     #[must_use]
-=======
->>>>>>> d3bcbce (rebasing with main)
     pub fn new(p0: p0::Parts, p1: p1::Parts) -> Self {
         Self {
             spi: CanSpi {
@@ -67,14 +51,11 @@ impl CanManager {
         spi: SPI,
         gp: GPIOTE,
     ) -> (Pin<Output<PushPull>>, Pin<Input<PullUp>>, Spi<SPI>, Gpiote) {
-        
         let pins = nrf52840_hal::spi::Pins {
             sck: Some(self.spi.sck),
             mosi: Some(self.spi.mosi),
             miso: Some(self.spi.miso),
         };
-
-        
 
         let spi_device = Spi::new(spi, pins, nrf52840_hal::spi::Frequency::M2, MODE_0);
         let gpiote = Gpiote::new(gp);

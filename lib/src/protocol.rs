@@ -6,7 +6,6 @@ pub mod constants;
 //pub mod message;
 pub mod sender;
 
-use can_mcp2515::drivers::message;
 #[allow(clippy::enum_glob_use)]
 use constants::{InvalidMessageId, Message::*};
 use embedded_can::{Frame, Id};

@@ -1,8 +1,6 @@
-<<<<<<< HEAD
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::pedantic)]
-=======
->>>>>>> d3bcbce (rebasing with main)
+
 use nrf52840_hal::saadc;
 /// Resistance to ground for the current sense pins.
 pub const R_PHASE_SENSE_TO_GROUND: f32 = 10_000.;
@@ -28,13 +26,9 @@ pub const ADC_BITS: usize = 14;
 pub const ADC_GAIN: f32 = 1. / 6.;
 
 /// The voltage divider used for current sensing.
-<<<<<<< HEAD
 /// $`I_shunt` = (2.5-V_sense *  ( `R_5+R_4` ) / `R_5`) / ( `R_shunt`  *
 /// `some_gain` ) $
-=======
-/// $I_shunt = (2.5-V_sense *  ( R_5+R_4 ) / R_5) / ( R_shunt  * some_gain )
 /// $
->>>>>>> d3bcbce (rebasing with main)
 ///
 ///
 /// RESULT = [V(P) – V(N)] * (GAIN/REFERENCE) * 1<<(RESOLUTION - m)
