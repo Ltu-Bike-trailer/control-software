@@ -16,7 +16,7 @@ pub enum Message {
 
     /// Represents a write of the left motor state.
     RightMotor = 1,
-    
+
     /// Represents a write of the motor reference values.
     SetMotorReference = 2,
 
