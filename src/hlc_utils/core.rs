@@ -47,9 +47,9 @@ pub struct Controller {
 impl Controller {
   
     /// controller output constants. 
-    pub const A: (f32, f32, f32) = (1.271, 0.0289, 0.01832);
+    const A: (f32, f32, f32) = (1.271, 0.0289, 0.01832);
     /// Input constants for controller. 
-    pub const B: (f32, f32, f32) = (0.3248, 0.4279, 0.1309);
+    const B: (f32, f32, f32) = (0.3248, 0.4279, 0.1309);
 
 
     #[inline(always)]
@@ -65,14 +65,13 @@ impl Controller {
     }
 
     #[inline(always)]
-     /// Do things
     /// Equation: 
     /// T(k) =
     /// 1.271*T(k-1)-0.0289*T(k-2)+0.01832*T(k-3)+0.3248*e(k-1)-0.4279*e(k-2)+0.1309*e(k-3)
     ///
     /// Where T(k) is output from controller as moment.
     /// While e(k) is the force insignal to the controller (loadcells).
-    pub fn actuate(&mut self, output: f32, error: f32) -> Option<f32> {
+    pub fn actuate(&mut self, error: f32) -> Option<f32> {
         // self.get_err::<3> is the newest value, and oldest value is self.get_err::<2>. 
         let ek: (f32, f32, f32) = (self.get_err::<3>(), self.get_err::<1>(), self.get_err::<2>()); 
         let tk: (f32, f32, f32) = (self.get_moment::<3>(),  self.get_moment::<1>(), self.get_moment::<2>());
@@ -80,14 +79,16 @@ impl Controller {
         let not_ready_e = self.e_input.into_iter().any(|val| val == 0f32);
         let not_ready_t = self.t_output.into_iter().any(|val| val == 0f32);
         
-        self.write_moment(output);
+        let actuate = Self::A.0 * tk.0 - Self::A.1 * tk.1 + Self::A.2 * tk.2 + Self::B.0 * ek.0 - Self::B.1 * ek.1 + Self::B.2 * ek.2; 
+
+        self.write_moment(actuate);
         self.write_err(error);
         
         if not_ready_e && not_ready_t {
             // Do nothing wait for all data to be present. 
             return None;
         } else {
-            return Some(Self::A.0 * tk.0 - Self::A.1 * tk.1 + Self::A.2 * tk.2 + Self::B.0 * ek.0 - Self::B.1 * ek.1 + Self::B.2 * ek.2);
+            return Some(actuate);
             
         }
     }
@@ -97,8 +98,9 @@ impl Controller {
         let ptr = match self.e_prior.checked_sub(N) {
             Some(val) => val,
             None => {
-                // 2, 1, 0, then wrap to 0 ... idx
-                3 - (N - self.e_prior)
+                //3 - (N - self.e_prior)
+                self.e_input.len() - (N - self.e_prior)
+
             }
         };
         self.e_input[ptr]

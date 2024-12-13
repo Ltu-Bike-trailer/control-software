@@ -74,6 +74,8 @@ mod hlc {
         candriver: Mcp2515Driver<Spi<SPI0>, Pin<Output<PushPull>>, Pin<Input<PullUp>>>,
         can_sender: channel::Sender<'static, CanMessage, 10>,
         can_receiver: channel::Receiver<'static, CanMessage, 10>,
+        hlc_controller: Controller,
+         
     }
 
     #[init]
@@ -93,7 +95,7 @@ mod hlc {
             miso: Some(port0.p0_28.into_floating_input().degrade()),
         };
 
-        //let mut can_manager = CanManager::new(port0, port1);
+        //let can_manager = CanManager::new(port0, port1);
         //let (cs_pin, int_pin, spi, gpiote) = can_manager.peripheral_instances(device.SPI0, device.GPIOTE);
 
         let cs_pin = port1.p1_02.into_push_pull_output(Level::High).degrade();
@@ -119,7 +121,16 @@ mod hlc {
             OSM,
         );
 
-        let can_settings = Mcp2515Settings::default();
+        let mut can_settings = Mcp2515Settings::default()
+            .enable_interrupts(&[
+                CanInte::MERRE,
+                CanInte::ERRIE,
+                CanInte::TX2IE,
+                CanInte::TX1IE,
+                CanInte::TX0IE,
+                CanInte::RX1IE,
+                CanInte::RX0IE]);
+
         let mut can_driver = Mcp2515Driver::init(spi, cs_pin, can_interrupt, can_settings);
 
         let (send, receive) = make_channel!(CanMessage, 10);
@@ -155,6 +166,13 @@ mod hlc {
             &[<P0_04<Disconnected> as saadc::Channel>::channel()],
             [0],
         );
+        
+        let control_timer = nrf52840_hal::timer::Timer::new(device.TIMER2);
+        let mut control_timer = control_timer.into_periodic();
+        control_timer.timeout::<1, 1000>(25u64.millis());
+        //control_timer.start(25u32.millis());
+        
+
 
         //Start sampeling the stype
         adc.start_sample();
@@ -179,6 +197,7 @@ mod hlc {
                 candriver: can_driver,
                 can_sender: send,
                 can_receiver: receive,
+                hlc_controller: Controller::new(),
             },
         )
     }
@@ -192,23 +211,22 @@ mod hlc {
         }
     }
 
-    #[task(binds = GPIOTE, shared = [gpiote, sender], local = [candriver, can_sender], priority = 5)]
+    #[task(binds = GPIOTE, shared = [gpiote, sender], local = [candriver, can_sender], priority = 4)]
     fn can_interrupt(mut cx: can_interrupt::Context) {
         let can_interrupt::LocalResources { candriver, .. } = cx.local;
         let handle = cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
                 defmt::println!("\n");
                 defmt::info!("GPIOTE interrupt occurred [channel 0] - Can Master!");
-
-                let interrupt_type = candriver.interrupt_decode().unwrap();
-                if let Some(frame) = candriver.handle_interrupt(interrupt_type) {
-                    //let mut msg_frame = frame;
-                    //let std_id = StandardId::new(msg_frame.id_raw()).unwrap();
-                    //let recieved_id = Message::try_from(std_id).unwrap();
-                    cx.local.can_sender.try_send(frame);
-
-                    // defmt::info!("Received the frame message type: {:?}",
-                    // Debug2Format(&recieved_id));
+                
+                let mut manager = candriver.interrupt_manager();
+                let mut received_message = None; 
+                while let Some(event) = manager.next() {
+                    if let Some(frame) = event.handle() {
+                        received_message = Some(frame);
+                        cx.local.can_sender.try_send(frame);
+                        // Debug2Format(&recieved_id));
+                    }
                 }
                 if candriver.interrupt_is_cleared() {
                     defmt::info!("All CAN interrupt has been handled!");
@@ -278,4 +296,17 @@ mod hlc {
             Mono::delay_ms(&mut Mono, 5000);
         }
     }
+
+    // TODO: - Change to hardware timer interrupt, not async software!
+    #[task(binds = TIMER2, local = [hlc_controller], shared = [s_type_force], priority = 5)]
+    fn controller_output(mut cx: controller_output::Context) {
+         
+        cx.shared.s_type_force.lock(|input_force|{
+            while let Some(actuate) = cx.local.hlc_controller.actuate(*input_force){
+                 
+            } 
+             
+        });
+
+    } 
 }
