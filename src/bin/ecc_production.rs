@@ -6,13 +6,7 @@
 //! - Setting current over can
 //! - PID based current control which is good enough.
 //! - Current sensing done as non intrusive as possible.
-#![allow(
-    warnings,
-    dead_code,
-    unused_variables,
-    unreachable_code,
-    internal_features
-)]
+#![allow(internal_features)]
 #![no_main]
 #![no_std]
 #![feature(type_alias_impl_trait, core_intrinsics)]
@@ -31,7 +25,10 @@ nrf_timer4_monotonic!(Mono, 16_000_000);
 )]
 mod etc {
 
-    use can_mcp2515::drivers::can::{AcceptanceFilterMask, CanInte, Mcp2515Driver};
+    use can_mcp2515::drivers::{
+        can::{CanInte, Mcp2515Driver},
+        message::CanMessage,
+    };
     use controller::{
         bldc::{DrivePattern, FloatDuty, Pattern},
         cart::{
@@ -40,8 +37,9 @@ mod etc {
         },
         RingBuffer,
     };
+    use embedded_can::blocking::Can;
     use esc::{self, events::GpioEvents, PinConfig};
-    use lib::protocol::{self, message::CanMessage, MessageType, WriteType};
+    use lib::protocol::{MessageType, WriteType};
     use nrf52840_hal::{
         gpio::{p1::P1_08, Input, Output, Pin, PullUp, PushPull},
         pac::{PWM0, PWM1, PWM2, SPI0, TIMER3},
@@ -61,14 +59,12 @@ mod etc {
     #[shared]
     /// Shared resources.
     struct Shared {
-        sender: protocol::sender::Sender<1>,
         duty: f32,
-        velocity: f32,
         current: f32,
         dvel: (u64, u64),
         pattern: Pattern,
         angle_acc: f32,
-        target_davell: f32,
+        target: (f32, Instant<u64, 1, 16_000_000>),
         current_sense: esc::CurrentManager,
     }
 
@@ -85,8 +81,6 @@ mod etc {
         can: Mcp2515Driver<Spi<SPI0>, P1_08<Output<PushPull>>, Pin<Input<PullUp>>>,
         can_event_sender: rtic_sync::channel::Sender<'static, Option<CanMessage>, 10>,
         can_event_receiver: rtic_sync::channel::Receiver<'static, Option<CanMessage>, 10>,
-        can_receive_sender: rtic_sync::channel::Sender<'static, CanMessage, 10>,
-        can_receive_receiver: rtic_sync::channel::Receiver<'static, CanMessage, 10>,
     }
 
     #[init]
@@ -123,20 +117,19 @@ mod etc {
             cs,
             int_pin,
             // Only accept messages for the left motor.
-            can_mcp2515::drivers::can::Mcp2515Settings::default()
+            can_mcp2515::drivers::can::Mcp2515Settings::default() // All bits have to match a left motor message.
+                .filter_b0(
+                    0x7FF,
+                    lib::protocol::constants::Message::SetMotorReference as u16,
+                )
+                // All bits have to match 0x0
+                .filter_b1(0x7FF, 0)
                 .enable_interrupts(&[
                     CanInte::RX0IE,
                     CanInte::TX0IE,
                     CanInte::TX1IE,
                     CanInte::TX2IE,
-                ])
-                // All bits have to match a left motor message.
-                .filter_b0(AcceptanceFilterMask::new(
-                    0x7FF,
-                    lib::protocol::constants::Message::SetMotorReference as u16,
-                ))
-                // All bits have to match 0x0
-                .filter_b1(AcceptanceFilterMask::new(0x7FF, 0)),
+                ]),
         );
         defmt::trace!("Init: Event manager");
         let events = pins.complete();
@@ -172,7 +165,6 @@ mod etc {
         //  The order that we should drive the phases.
         let drive_pattern = DrivePattern::new();
 
-        let sender = protocol::sender::Sender::new();
         debug_assert!(Mono::now().duration_since_epoch().to_micros() != 0);
 
         // Spawn the tasks.
@@ -189,19 +181,15 @@ mod etc {
 
         let (can_event_sender, can_event_receiver) =
             rtic_sync::make_channel!(Option<CanMessage>, 10);
-        let (can_receive_sender, can_receive_receiver) = rtic_sync::make_channel!(CanMessage, 10);
         (
             Shared {
-                // Initialization of shared resources go here
-                sender,
                 // ~.1 = MAX speed, ~.7 zero speed
                 duty: 0.5,
-                velocity: 0.,
                 current: 0.,
                 dvel: (0, 0),
                 pattern: Default::default(),
                 angle_acc: 0.,
-                target_davell: 0.3,
+                target: (0.3, Instant::<u64, 1, 16_000_000>::from_ticks(0)),
                 current_sense,
             },
             Local {
@@ -219,8 +207,6 @@ mod etc {
                 can,
                 can_event_receiver,
                 can_event_sender,
-                can_receive_sender,
-                can_receive_receiver,
             },
         )
     }
@@ -322,13 +308,13 @@ mod etc {
         }
     }
 
-    #[task(local = [can,can_event_receiver], shared = [target_davell], priority = 3)]
+    #[task(local = [can,can_event_receiver], shared = [target], priority = 3)]
     /// Manages CAN messages.
     async fn can(mut cx: can::Context) {
         let mut queue = lib::protocol::sender::Sender::new();
         while let Ok(message) = cx.local.can_event_receiver.recv().await {
             if message.is_none() {
-                let events = cx.local.can.interrupt_manager();
+                let mut events = cx.local.can.interrupt_manager();
                 while let Some(event) = events.next() {
                     if let Some(message) = event.handle() {
                         let de: MessageType = match MessageType::try_from(&message) {
@@ -341,7 +327,7 @@ mod etc {
                             }
                             _ => continue,
                         };
-                        cx.shared.target_davell.lock(|duty| *duty = target);
+                        cx.shared.target.lock(|duty| *duty = (target, deadline));
                     }
                 }
                 if let Some(msg) = queue.dequeue() {
@@ -349,7 +335,7 @@ mod etc {
                     let _ = cx.local.can.transmit(&msg);
                 } else {
                     // Grabs the 10 latest control messages from the buffer. This is safe since we
-                    // will never collide with an ongoing write.
+                    // will never collide with an ongoing write due to shere size of the buffer.
                     queue = unsafe { controller::util::DATA.get_n_latest::<10>() };
                 }
 
@@ -394,7 +380,7 @@ mod etc {
             // Current angular acceleration. This allows for non intrusive logging.
             angle_acc,
             // The target gradient in angular velocity.
-            target_davell,
+            target,
         ],
         priority = 4,
     )]
@@ -408,12 +394,12 @@ mod etc {
         let control_loop_timer = cx.local.control_loop_timer;
         control_loop_timer.reset_event();
 
-        let target = cx.shared.target_davell.lock(|t| *t);
+        let (mut target, deadline) = cx.shared.target.lock(|t| *t);
 
-        let current = cx.shared.current.lock(|current| {
-            let ret = *current;
-            ret
-        });
+        if Mono::now() > deadline {
+            target = 0.;
+        }
+        let current = cx.shared.current.lock(|current| *current);
 
         // TODO: Remove this ful-hack if at all possible.
         *cx.local.current = current;

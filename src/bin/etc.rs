@@ -26,13 +26,7 @@
 //!
 //! Currently this logs to the rtt but this should be changed to log the CAN bus
 //! in the coming revisions.
-#![allow(
-    warnings,
-    dead_code,
-    unused_variables,
-    unreachable_code,
-    internal_features
-)]
+#![allow(internal_features)]
 #![no_main]
 #![no_std]
 #![feature(type_alias_impl_trait, core_intrinsics)]
@@ -51,16 +45,19 @@ nrf_rtc0_monotonic!(Mono);
 )]
 mod etc {
 
+    use can_mcp2515::drivers::{
+        can::{CanInte, Mcp2515Driver, Mcp2515Settings},
+        message::CanMessage,
+    };
     use controller::{
         bldc::{DrivePattern, FloatDuty, Pattern},
         cart,
-        drivers::can::{AcceptanceFilterMask, CanInte, Mcp2515Driver, Mcp2515Settings},
         RingBuffer,
     };
     use cortex_m::asm;
     use embedded_can::blocking::Can;
     use esc::{self, events::GpioEvents, PinConfig};
-    use lib::protocol::{self, message::CanMessage, MessageType, MotorSubSystem, WriteType};
+    use lib::protocol::{MessageType, MotorSubSystem, WriteType};
     use nrf52840_hal::{
         gpio::{p1::P1_08, Input, Output, Pin, PullUp, PushPull},
         pac::{PWM0, PWM1, PWM2, SPI0, TIMER3},
@@ -79,9 +76,7 @@ mod etc {
     #[shared]
     /// Shared resources.
     struct Shared {
-        sender: protocol::sender::Sender<10>,
         duty: f32,
-        velocity: f32,
         current: f32,
         dvel: (u64, u64),
         pattern: Pattern,
@@ -100,11 +95,9 @@ mod etc {
         drive_pattern: DrivePattern,
         control_loop_timer: nrf52840_hal::timer::Timer<TIMER3, OneShot>,
         buffer: RingBuffer<f32, 10>,
-        can: Mcp2515Driver<Spi<SPI0>, P1_08<Output<PushPull>>>,
+        can: Mcp2515Driver<Spi<SPI0>, P1_08<Output<PushPull>>, Pin<Input<PullUp>>>,
         can_event_sender: rtic_sync::channel::Sender<'static, Option<CanMessage>, 10>,
         can_event_receiver: rtic_sync::channel::Receiver<'static, Option<CanMessage>, 10>,
-        can_receive_sender: rtic_sync::channel::Sender<'static, CanMessage, 10>,
-        can_receive_receiver: rtic_sync::channel::Receiver<'static, CanMessage, 10>,
     }
 
     #[init]
@@ -129,20 +122,18 @@ mod etc {
         let (pins, current_sense) = pins.configure_adc(cx.device.SAADC);
 
         defmt::info!("Current config done :)");
-        let (pins, (spi, _int_pin, cs)) = pins.configure_spi();
-        let can = controller::drivers::can::Mcp2515Driver::init(
+        let (pins, (spi, int_pin, cs)) = pins.configure_spi();
+        let can = can_mcp2515::drivers::can::Mcp2515Driver::init(
             spi,
             cs,
+            int_pin,
             // Only accept messages for the left motor.
             Mcp2515Settings::default()
                 .enable_interrupt(CanInte::RX0IE)
                 // All bits have to match a left motor message.
-                .filter_b0(AcceptanceFilterMask::new(
-                    0x7FF,
-                    lib::protocol::constants::Message::LeftMotor as u16,
-                ))
+                .filter_b0(0x7FF, lib::protocol::constants::Message::LeftMotor as u16)
                 // All bits have to match 0x0
-                .filter_b1(AcceptanceFilterMask::new(0x7FF, 0)),
+                .filter_b1(0x7FF, 0),
         );
         defmt::info!("CAN initiated :)");
         //current_sense.start_sample();
@@ -178,7 +169,6 @@ mod etc {
         //  The order that we should drive the phases.
         let drive_pattern = DrivePattern::new();
 
-        let sender = protocol::sender::Sender::new();
         debug_assert!(Mono::now().duration_since_epoch().to_micros() != 0);
 
         defmt::info!("Sender spawned :)");
@@ -197,16 +187,11 @@ mod etc {
 
         let (can_event_sender, can_event_receiver) =
             rtic_sync::make_channel!(Option<CanMessage>, 10);
-        let (can_receive_sender, can_receive_receiver) = rtic_sync::make_channel!(CanMessage, 10);
-
         defmt::info!("Init done :)");
         (
             Shared {
-                // Initialization of shared resources go here
-                sender,
                 // ~.1 = MAX speed, ~.7 zero speed
                 duty: 0.5,
-                velocity: 0.,
                 current: 0.,
                 dvel: (0, 0),
                 pattern: Default::default(),
@@ -227,8 +212,6 @@ mod etc {
                 can,
                 can_event_receiver,
                 can_event_sender,
-                can_receive_sender,
-                can_receive_receiver,
             },
         )
     }
@@ -666,7 +649,7 @@ mod etc {
         let p = (KP * err).clamp(-100., 100.);
         let i = (*cx.local.prev + err / 2.) * (DURATION.to_micros() as f32 / 1_000_000.);
         *cx.local.integral = (*cx.local.integral + i).clamp(-100., 100.);
-        let i = KD * *cx.local.integral;
+        let i = KI * *cx.local.integral;
         let d = KD
             * ((err - *cx.local.prev) / (DURATION.to_micros() as f32 / 1_000_000.))
                 .clamp(-100., 100.);
