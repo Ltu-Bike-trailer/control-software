@@ -250,7 +250,7 @@ mod etc {
     ///
     /// These interrupts can be
     /// - Hal effect
-    /// - Can buss
+    /// - Can bus
     ///
     /// ## Hal effect
     ///
@@ -359,7 +359,7 @@ mod etc {
             previous_error: f32 = 0.,
             // Integral component accumulator.
             integral: f32 = 0.,
-            // Counter for wether or not the cart control system should be allowed to run.
+            // Counter for whether or not the cart control system should be allowed to run.
             started:u32 = 0,
             // The previous current
             current:f32 = 0.,

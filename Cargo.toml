@@ -10,8 +10,8 @@ defmt = { version = "0.3", features = ["encoding-rzcobs"] }
 defmt-rtt = { version = "0.4" }
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 rtic = { version = "2.1.1", features = ["thumbv7-backend"] }
-#nrf52840-hal = { git = "https://github.com/Ltu-Bike-trailer/nrf-hal.git", features = [
-nrf52840-hal = { path = "../nrf-hal/nrf52840-hal", features = [
+nrf52840-hal = { git = "https://github.com/Ltu-Bike-trailer/nrf-hal.git", features = [
+    #nrf52840-hal = { path = "../nrf-hal/nrf52840-hal", features = [
     "rt",
 ], default-features = false }
 rtic-monotonics = { version = "2.0.2", features = [
@@ -26,8 +26,8 @@ statics = { path = "./statics" }
 lib = { path = "./lib", default-features = false }
 # Helpers
 
-#esc = { package = "bsp", git = "https://github.com/Ltu-Bike-trailer/ESC.git", branch = "bsp", optional = true, default-features = false}
-esc = { package = "bsp", path = "../ESC/bsp", optional = true, default-features = false }
+esc = { package = "bsp", git = "https://github.com/Ltu-Bike-trailer/ESC.git", branch = "bsp-2", optional = true, default-features = false }
+#esc = { package = "bsp", path = "../ESC/bsp", optional = true, default-features = false }
 
 ## Defines a double ended queue implementation of arrays instead of vectors
 arraydeque = { version = "0.5.1", default-features = false }
