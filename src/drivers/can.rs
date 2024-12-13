@@ -1035,7 +1035,7 @@ impl<SPI: embedded_hal::spi::SpiBus, PIN: OutputPin, PININT: InputPin>
         defmt::info!("Setting up Configuration: ");
 
         self.reset_instruction();
-
+        
         let canstat_reg = self.read_register(MCP2515Register::CANSTAT, 0x00).unwrap();
         let canctrl_byte = self.get_canctrl_mask(can_settings.canctrl);
 

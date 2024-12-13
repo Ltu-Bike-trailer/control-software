@@ -7,7 +7,7 @@
 #![deny(warnings)]
 
 use controller as _; // global logger + panicking-behavior + memory layout
-
+type Constant = Pin<hal::gpio::Output<PushPull>>;
 #[rtic::app(
     // TODO: Replace `some_hal::pac` with the path to the PAC
     device = nrf52840_hal::pac,
