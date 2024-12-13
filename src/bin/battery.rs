@@ -32,7 +32,7 @@ mod app {
     use embedded_can::blocking::Can;
 
     use lib::protocol::sender::Sender;
-    use nrf52840_hal::{self as hal, gpio::*, gpiote::Gpiote, pac::{saadc, SPI0}, saadc::{Gain, Oversample, Reference, SaadcConfig, Time}, spi::{Frequency, Spi}  
+    use nrf52840_hal::{self as hal, gpio::*, gpiote::Gpiote, pac::{saadc, SPI0}, saadc::{Gain, Oversample, Reference, Resistor, Resolution, SaadcConfig, Time}, spi::{Frequency, Spi}  
     };
     use rtic_monotonics::systick::*;
 
@@ -40,7 +40,6 @@ mod app {
     // Shared resources go here
     #[shared]
     struct Shared {
-        // TODO: Add resources
         gpiote: Gpiote,
 
     }
@@ -48,8 +47,6 @@ mod app {
     // Local resources go here
     #[local]
     struct Local {
-        // TODO: Add resources
-        spi_battery: Spi<SPI0>,
         curr_soc: f32,
         saadc: hal::saadc::Saadc,
         saadc_pin: p0::P0_31<Input<Floating>>,
@@ -75,11 +72,15 @@ mod app {
 
         // set up saadic(Successive approximation analog-to-digital converter)
         // set up setting for sampling analog signal
-        let mut saadc_config = SaadcConfig::default();
-        saadc_config.reference = Reference::INTERNAL;
-        saadc_config.gain = Gain::GAIN1_6;
-        saadc_config.time = Time::_40US;
-        saadc_config.oversample = Oversample::OVER256X;
+        let mut saadc_config = SaadcConfig {
+                resolution: Resolution::_14BIT,
+                oversample: Oversample::OVER256X,
+                reference: Reference::INTERNAL,
+                gain: Gain::GAIN1_6,
+                resistor: Resistor::BYPASS,
+                time: Time::_40US,
+            };
+
 
         // create new saadc object
         let mut saadc = hal::saadc::Saadc::new(device.SAADC, saadc_config);
@@ -109,9 +110,9 @@ mod app {
         let temp_volt = (saadc_to_volt_1 - saadc_to_volt_2).abs();
         info!("temp_volt {}", temp_volt);
 
-        // temprature = (-5.8151*current_voltage³ + 24.9708*current_voltage² - 61.8928*current_voltage + 48.8572)
+        // temperature = (-5.8151*current_voltage³ + 24.9708*current_voltage² - 61.8928*current_voltage + 48.8572)
         let temp = -5.8151*(temp_volt*temp_volt*temp_volt) + 24.9708*(temp_volt*temp_volt) - 61.8928*temp_volt + 48.8572;
-        info!("The tempature is {}", temp);
+        info!("The temperature is {}", temp);
 
         // battery voltage Vm = Vb*10k/(150k+10k)
         let bat_voltage = ((saadc_to_volt_0*(150000.0+10000.0))/10000.0)+1.3;
@@ -119,7 +120,7 @@ mod app {
 
         // battery voltage loss by temp function (approximated from us gov study: https://www.osti.gov/servlets/purl/975252) 
         let bat_temp_ratio = 0.817 + 9.19*0.001*temp + -4.24*0.00001*temp*temp;
-        info!("The battery tempature ratio is {}", bat_temp_ratio);
+        info!("The battery temperature ratio is {}", bat_temp_ratio);
 
         // voltage normailized for 25 degrees
         let norm = bat_voltage/bat_temp_ratio;
@@ -163,9 +164,9 @@ mod app {
         );
 
         // set up can setting
-        let spi_can: Spi<SPI0> = unsafe { (0x0 as *mut Spi<SPI0>).read() };
+        //let spi_can: Spi<SPI0> = unsafe { (0x0 as *mut Spi<SPI0>).read() };
         let settings = Mcp2515Settings::default();
-        let can_driver = Mcp2515Driver::init(spi_can, cs0, can_interrupt, settings);
+        let can_driver = Mcp2515Driver::init(spi_battery, cs0, can_interrupt, settings);
 
         // new interrupt (should not be used as this firmware only sends data)
         let gpiote = Gpiote::new(device.GPIOTE);
@@ -185,7 +186,7 @@ mod app {
             },
             Local {
                 // Initialization of local resources go here
-                saadc, saadc_pin, old_soc, sender, can_driver, curr_soc, spi_battery
+                saadc, saadc_pin, old_soc, sender, can_driver, curr_soc
 
             },
         )
@@ -242,12 +243,7 @@ mod app {
         curr_soc = *old_soc - i_shunt/20.0 * 0.5;
 
         // normalize for temp variations battery state of charge
-        if curr_soc > 1.0{
-            curr_soc = 1.0
-        }
-        if curr_soc < 0.0 {
-            curr_soc = 0.0
-        }
+        curr_soc = curr_soc.clamp(0.0, 1.0);
         
         // if the old State of Charge(soc) has lowered by 1% send the new soc via CAN
         if curr_soc < (*old_soc-0.01) {
@@ -271,7 +267,7 @@ mod app {
     fn can_interrupt(mut cx: can_interrupt::Context) {
         //Do nothing this board has a shared SPI bus so its dangerous to read whenever
         //also it has no reason to read any messages of the can bus.
-        let _ = cx.shared.gpiote.lock(|gpiote| {
+        cx.shared.gpiote.lock(|gpiote| {
             gpiote.reset_events();
         });
     }
