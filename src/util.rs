@@ -73,7 +73,11 @@ impl<const N: usize> Data<N> {
     }
 
     /// Gets the n latest control logs as can messages.
-    #[allow(clippy::cast_precision_loss,clippy::cast_sign_loss,clippy::cast_possible_truncation)]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_truncation
+    )]
     #[must_use]
     pub fn get_n_latest<const DEQUEUE: usize>(&self) -> lib::protocol::sender::Sender<DEQUEUE> {
         let data = self.buffer.borrow_data();

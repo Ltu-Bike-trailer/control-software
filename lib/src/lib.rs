@@ -34,13 +34,13 @@
     clippy::from_over_into,
     unstable_features,
     incomplete_features,
-    clippy::inline_always
+    clippy::inline_always,
+    static_mut_refs
 )]
 #![feature(
     f16,
     generic_const_exprs,
     const_trait_impl,
-    generic_associated_types_extended,
     generic_const_items,
     generic_arg_infer,
     adt_const_params

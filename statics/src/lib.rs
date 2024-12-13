@@ -7,7 +7,6 @@ use syn::{
     Data,
     DeriveInput,
     Ident,
-    LitInt,
     LitStr,
     Token,
 };

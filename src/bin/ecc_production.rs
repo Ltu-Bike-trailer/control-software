@@ -6,12 +6,11 @@
 //! - Setting current over can
 //! - PID based current control which is good enough.
 //! - Current sensing done as non intrusive as possible.
-#![allow(internal_features)]
+#![allow(internal_features, static_mut_refs)]
 #![no_main]
 #![no_std]
 #![feature(type_alias_impl_trait, core_intrinsics)]
-#![deny(clippy::all)]
-#![deny(warnings)]
+#![deny(clippy::all, warnings)]
 
 // PHASE ORDER: Yellow, blue green.
 
