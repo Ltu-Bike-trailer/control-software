@@ -26,13 +26,7 @@
 //!
 //! Currently this logs to the rtt but this should be changed to log the CAN bus
 //! in the coming revisions.
-#![allow(
-    warnings,
-    dead_code,
-    unused_variables,
-    unreachable_code,
-    internal_features
-)]
+#![allow(internal_features)]
 #![no_main]
 #![no_std]
 #![feature(type_alias_impl_trait, core_intrinsics)]
@@ -51,18 +45,24 @@ nrf_rtc0_monotonic!(Mono);
 )]
 mod etc {
 
+    use can_mcp2515::drivers::{
+        can::{CanInte, Mcp2515Driver, Mcp2515Settings},
+        message::CanMessage,
+    };
     use controller::{
         bldc::{DrivePattern, FloatDuty, Pattern},
         cart,
         RingBuffer,
     };
     use cortex_m::asm;
+    use embedded_can::blocking::Can;
     use esc::{self, events::GpioEvents, PinConfig};
-    use lib::protocol;
+    use lib::protocol::{MessageType, MotorSubSystem, WriteType};
     use nrf52840_hal::{
-        gpio::{Input, Pin, PullUp},
-        pac::{PWM0, PWM1, PWM2, TIMER3},
+        gpio::{p1::P1_08, Input, Output, Pin, PullUp, PushPull},
+        pac::{PWM0, PWM1, PWM2, SPI0, TIMER3},
         pwm::{self, Pwm},
+        spi::Spi,
         time::U32Ext,
         timer::OneShot,
     };
@@ -76,20 +76,18 @@ mod etc {
     #[shared]
     /// Shared resources.
     struct Shared {
-        sender: protocol::sender::Sender<10>,
         duty: f32,
-        velocity: f32,
         current: f32,
         dvel: (u64, u64),
         pattern: Pattern,
         angle_acc: f32,
         target_davell: f32,
+        current_sense: esc::CurrentManager,
     }
 
     #[local]
     struct Local {
         events: esc::events::Manager,
-        current_sense: esc::CurrentManager,
         hal_pins: [Pin<Input<PullUp>>; 3],
         phase1: Pwm<PWM0>,
         phase2: Pwm<PWM1>,
@@ -97,25 +95,47 @@ mod etc {
         drive_pattern: DrivePattern,
         control_loop_timer: nrf52840_hal::timer::Timer<TIMER3, OneShot>,
         buffer: RingBuffer<f32, 10>,
+        can: Mcp2515Driver<Spi<SPI0>, P1_08<Output<PushPull>>, Pin<Input<PullUp>>>,
+        can_event_sender: rtic_sync::channel::Sender<'static, Option<CanMessage>, 10>,
+        can_event_receiver: rtic_sync::channel::Receiver<'static, Option<CanMessage>, 10>,
     }
 
     #[init]
     fn init(cx: init::Context) -> (Shared, Local) {
         defmt::info!("init");
         nrf52840_hal::Clocks::new(cx.device.CLOCK)
-            .enable_ext_hfosc()
+            //.enable_ext_hfosc()
             .start_lfclk();
         Mono::start(cx.device.RTC0);
+        defmt::info!("Clocks done :)");
 
         let p0 = nrf52840_hal::gpio::p0::Parts::new(cx.device.P0);
         let p1 = nrf52840_hal::gpio::p1::Parts::new(cx.device.P1);
         let ppi = nrf52840_hal::ppi::Parts::new(cx.device.PPI);
 
-        let pins = PinConfig::new(p0, p1, ppi, cx.device.GPIOTE);
+        let pins = PinConfig::new(p0, p1, ppi, cx.device.GPIOTE, cx.device.SPI0);
         let (pins, p1) = pins.configure_p1();
         let (pins, p2) = pins.configure_p2();
         let (pins, p3) = pins.configure_p3();
+
+        defmt::info!("Phases done");
         let (pins, current_sense) = pins.configure_adc(cx.device.SAADC);
+
+        defmt::info!("Current config done :)");
+        let (pins, (spi, int_pin, cs)) = pins.configure_spi();
+        let can = can_mcp2515::drivers::can::Mcp2515Driver::init(
+            spi,
+            cs,
+            int_pin,
+            // Only accept messages for the left motor.
+            Mcp2515Settings::default()
+                .enable_interrupt(CanInte::RX0IE)
+                // All bits have to match a left motor message.
+                .filter_b0(0x7FF, lib::protocol::constants::Message::LeftMotor as u16)
+                // All bits have to match 0x0
+                .filter_b1(0x7FF, 0),
+        );
+        defmt::info!("CAN initiated :)");
         //current_sense.start_sample();
         let events = pins.complete();
         let hal_pins = [p1.hal_effect, p2.hal_effect, p3.hal_effect];
@@ -140,17 +160,18 @@ mod etc {
             .set_output_pin(pwm::Channel::C1, p3.low_side)
             .set_period(10u32.khz().into())
             .set_duty(0.1);
-
+        phase1.enable_interrupt(pwm::PwmEvent::PwmPeriodEnd);
         phase1.center_align();
         phase2.center_align();
         phase3.center_align();
+        defmt::info!("PHASES configured and center aligned :)");
 
         //  The order that we should drive the phases.
         let drive_pattern = DrivePattern::new();
 
-        let sender = protocol::sender::Sender::new();
         debug_assert!(Mono::now().duration_since_epoch().to_micros() != 0);
 
+        defmt::info!("Sender spawned :)");
         // Spawn the tasks.
         let mut timer = nrf52840_hal::timer::Timer::new(cx.device.TIMER3);
         timer.enable_interrupt();
@@ -161,25 +182,26 @@ mod etc {
         );
         motor_driver::spawn().ok().unwrap();
         telemetry::spawn().ok().unwrap();
+
         //mono_sweep::spawn().ok().unwrap();
 
+        let (can_event_sender, can_event_receiver) =
+            rtic_sync::make_channel!(Option<CanMessage>, 10);
+        defmt::info!("Init done :)");
         (
             Shared {
-                // Initialization of shared resources go here
-                sender,
                 // ~.1 = MAX speed, ~.7 zero speed
                 duty: 0.5,
-                velocity: 0.,
                 current: 0.,
                 dvel: (0, 0),
                 pattern: Default::default(),
                 angle_acc: 0.,
                 target_davell: 0.3,
+                current_sense,
             },
             Local {
                 // Initialization of local resources go here
                 events,
-                current_sense,
                 hal_pins,
                 phase1,
                 phase2,
@@ -187,6 +209,9 @@ mod etc {
                 drive_pattern,
                 control_loop_timer,
                 buffer: RingBuffer::new([0.1, -0.05, 0.3, -0.1, 0.5, -0.15, 0.7, -0.2, 10., -1.]),
+                can,
+                can_event_receiver,
+                can_event_sender,
             },
         )
     }
@@ -214,6 +239,7 @@ mod etc {
             // 
             // This allows for angular acceleration calculations.
             prev_vel_t: Option<Instant<u64,1,32_768>> = None,
+            can_event_sender,
 
         ],
         shared = [
@@ -267,7 +293,9 @@ mod etc {
                 GpioEvents::P3HalFalling => {
                     cx.local.drive_pattern.clear_c();
                 }
-                GpioEvents::CAN => todo!("Handle CAN event"),
+                GpioEvents::CAN => {
+                    let _ = cx.local.can_event_sender.try_send(None);
+                }
             }
         }
 
@@ -286,6 +314,37 @@ mod etc {
             let dt = dt.to_micros();
             let pt = (now - pt).to_micros();
             cx.shared.dvel.lock(|dvel| *dvel = (dt, pt));
+        }
+    }
+
+    #[task(local = [can,can_event_receiver], shared = [duty], priority = 3)]
+    /// Manages CAN messages.
+    async fn can(mut cx: can::Context) {
+        while let Ok(message) = cx.local.can_event_receiver.recv().await {
+            if message.is_none() {
+                let event_code = match cx.local.can.interrupt_decode() {
+                    Ok(code) => code,
+                    // We do not have time for recovery here
+                    Err(_) => break,
+                };
+                if let Some(message) = cx.local.can.handle_interrupt(event_code) {
+                    let de: MessageType = match MessageType::try_from(&message) {
+                        Ok(val) => val,
+                        Err(_) => break,
+                    };
+                    let reference = match de {
+                        MessageType::Write(WriteType::Motor(MotorSubSystem::Left(msg))) => msg,
+                        MessageType::Write(WriteType::Motor(MotorSubSystem::Right(msg))) => msg,
+                        _ => break,
+                    };
+                    cx.shared.duty.lock(|duty| *duty = reference);
+                }
+
+                continue;
+            }
+            let message = unsafe { message.unwrap_unchecked() };
+
+            let _ = cx.local.can.transmit(&message);
         }
     }
 
@@ -334,93 +393,107 @@ mod etc {
                 // but improving the performance of the etc.
                 Mono::delay(50u64.micros()).await;
             }
-            // Apply the switching pattern.
-            //
-            // If any of the phases tries to kill the system we simply return early.
-            'apply: {
-                match (p1h, p1l) {
-                    (true, false) => {
-                        phase1.disable_channel(pwm::Channel::C1);
-                        asm::nop();
-                        phase1.enable_channel(pwm::Channel::C0);
-                    }
-                    (false, true) => {
-                        phase1.disable_channel(pwm::Channel::C0);
-                        asm::nop();
-                        phase1.enable_channel(pwm::Channel::C1);
-                    }
-                    (false, false) => {
-                        phase1.disable_channel(pwm::Channel::C0);
-                        asm::nop();
-                        phase1.disable_channel(pwm::Channel::C1);
-                    }
-                    _ => {
-                        phase1.disable_channel(pwm::Channel::C0);
-                        phase1.disable_channel(pwm::Channel::C1);
-                        phase2.disable_channel(pwm::Channel::C0);
-                        phase2.disable_channel(pwm::Channel::C1);
-                        phase3.disable_channel(pwm::Channel::C0);
-                        phase3.disable_channel(pwm::Channel::C1);
-                        break 'apply;
-                    }
-                };
 
-                match (p2h, p2l) {
-                    (true, false) => {
-                        phase2.disable_channel(pwm::Channel::C1);
-                        asm::nop();
-                        phase2.enable_channel(pwm::Channel::C0);
-                    }
-                    (false, true) => {
-                        phase2.disable_channel(pwm::Channel::C0);
-                        asm::nop();
-                        phase2.enable_channel(pwm::Channel::C1);
-                    }
-                    (false, false) => {
-                        phase2.disable_channel(pwm::Channel::C0);
-                        asm::nop();
-                        phase2.disable_channel(pwm::Channel::C1);
-                    }
-                    _ => {
-                        phase1.disable_channel(pwm::Channel::C0);
-                        phase1.disable_channel(pwm::Channel::C1);
-                        phase2.disable_channel(pwm::Channel::C0);
-                        phase2.disable_channel(pwm::Channel::C1);
-                        phase3.disable_channel(pwm::Channel::C0);
-                        phase3.disable_channel(pwm::Channel::C1);
-                        break 'apply;
-                    }
-                };
+            #[no_mangle]
+            #[inline(never)]
+            fn apply(
+                ((p1h, p1l), (p2h, p2l), (p3h, p3l)): ((bool, bool), (bool, bool), (bool, bool)),
+                phase1: &mut Pwm<PWM0>,
+                phase2: &mut Pwm<PWM1>,
+                phase3: &mut Pwm<PWM2>,
+            ) {
+                // Apply the switching pattern.
+                //
+                // If any of the phases tries to kill the system we simply return early.
+                'apply: {
+                    match (p1h, p1l) {
+                        (true, false) => {
+                            phase1.disable_channel(pwm::Channel::C1);
+                            asm::nop();
+                            phase1.enable_channel(pwm::Channel::C0);
+                        }
+                        (false, true) => {
+                            phase1.disable_channel(pwm::Channel::C0);
+                            asm::nop();
+                            phase1.enable_channel(pwm::Channel::C1);
+                        }
+                        (false, false) => {
+                            phase1.disable_channel(pwm::Channel::C0);
+                            asm::nop();
+                            phase1.disable_channel(pwm::Channel::C1);
+                        }
+                        _ => {
+                            phase1.disable_channel(pwm::Channel::C0);
+                            phase1.disable_channel(pwm::Channel::C1);
+                            phase2.disable_channel(pwm::Channel::C0);
+                            phase2.disable_channel(pwm::Channel::C1);
+                            phase3.disable_channel(pwm::Channel::C0);
+                            phase3.disable_channel(pwm::Channel::C1);
+                            break 'apply;
+                        }
+                    };
 
-                match (p3h, p3l) {
-                    (true, false) => {
-                        phase3.disable_channel(pwm::Channel::C1);
-                        phase3.enable_channel(pwm::Channel::C0);
-                    }
-                    (false, true) => {
-                        phase3.disable_channel(pwm::Channel::C0);
-                        phase3.enable_channel(pwm::Channel::C1);
-                    }
-                    (false, false) => {
-                        phase3.disable_channel(pwm::Channel::C0);
-                        phase3.disable_channel(pwm::Channel::C1);
-                    }
-                    _ => {
-                        phase1.disable_channel(pwm::Channel::C0);
-                        phase1.disable_channel(pwm::Channel::C1);
-                        phase2.disable_channel(pwm::Channel::C0);
-                        phase2.disable_channel(pwm::Channel::C1);
-                        phase3.disable_channel(pwm::Channel::C0);
-                        phase3.disable_channel(pwm::Channel::C1);
-                        break 'apply;
-                    }
-                };
+                    match (p2h, p2l) {
+                        (true, false) => {
+                            phase2.disable_channel(pwm::Channel::C1);
+                            asm::nop();
+                            phase2.enable_channel(pwm::Channel::C0);
+                        }
+                        (false, true) => {
+                            phase2.disable_channel(pwm::Channel::C0);
+                            asm::nop();
+                            phase2.enable_channel(pwm::Channel::C1);
+                        }
+                        (false, false) => {
+                            phase2.disable_channel(pwm::Channel::C0);
+                            asm::nop();
+                            phase2.disable_channel(pwm::Channel::C1);
+                        }
+                        _ => {
+                            phase1.disable_channel(pwm::Channel::C0);
+                            phase1.disable_channel(pwm::Channel::C1);
+                            phase2.disable_channel(pwm::Channel::C0);
+                            phase2.disable_channel(pwm::Channel::C1);
+                            phase3.disable_channel(pwm::Channel::C0);
+                            phase3.disable_channel(pwm::Channel::C1);
+                            break 'apply;
+                        }
+                    };
+
+                    match (p3h, p3l) {
+                        (true, false) => {
+                            phase3.disable_channel(pwm::Channel::C1);
+                            phase3.enable_channel(pwm::Channel::C0);
+                        }
+                        (false, true) => {
+                            phase3.disable_channel(pwm::Channel::C0);
+                            phase3.enable_channel(pwm::Channel::C1);
+                        }
+                        (false, false) => {
+                            phase3.disable_channel(pwm::Channel::C0);
+                            phase3.disable_channel(pwm::Channel::C1);
+                        }
+                        _ => {
+                            phase1.disable_channel(pwm::Channel::C0);
+                            phase1.disable_channel(pwm::Channel::C1);
+                            phase2.disable_channel(pwm::Channel::C0);
+                            phase2.disable_channel(pwm::Channel::C1);
+                            phase3.disable_channel(pwm::Channel::C0);
+                            phase3.disable_channel(pwm::Channel::C1);
+                            break 'apply;
+                        }
+                    };
+                }
             }
+            apply(((p1h, p1l), (p2h, p2l), (p3h, p3l)), phase1, phase2, phase3);
             // This is a bit faster.
             // The sign of the f32 is only relevant when we are setting the direction to
             // rotate, not while setting the duty cycles of the mosfets.
             // Any such control should be done before this.
             let duty = unsafe { core::intrinsics::fabsf32(duty) };
+            // Disable interrupts until next time.
+            unsafe { nrf52840_hal::pac::NVIC::unmask(nrf52840_hal::pac::interrupt::PWM0) };
+            nrf52840_hal::pac::NVIC::unpend(nrf52840_hal::pac::interrupt::PWM0);
             phase1.set_duty(duty);
             phase2.set_duty(duty);
             phase3.set_duty(duty);
@@ -576,7 +649,7 @@ mod etc {
         let p = (KP * err).clamp(-100., 100.);
         let i = (*cx.local.prev + err / 2.) * (DURATION.to_micros() as f32 / 1_000_000.);
         *cx.local.integral = (*cx.local.integral + i).clamp(-100., 100.);
-        let i = KD * *cx.local.integral;
+        let i = KI * *cx.local.integral;
         let d = KD
             * ((err - *cx.local.prev) / (DURATION.to_micros() as f32 / 1_000_000.))
                 .clamp(-100., 100.);
@@ -630,6 +703,16 @@ mod etc {
         }
     }
 
+    #[task(binds = PWM0, shared=[current_sense], priority = 3)]
+    fn start_sample(mut cx: start_sample::Context) {
+        cx.shared.current_sense.lock(|sense| {
+            sense.start_sample();
+        });
+
+        // Disable interrupts until next time.
+        nrf52840_hal::pac::NVIC::mask(nrf52840_hal::pac::interrupt::PWM0);
+    }
+
     // TODO: make this have a higher priority if we ever use it. As is, it will
     // never run.
     //
@@ -639,11 +722,14 @@ mod etc {
     // phase pattern changes we sample it once. for this we need the period of a
     // single pwm wave and ensure that we sample this. Or rather give ourself a
     // bit of a grace period on both edges.
-    #[task(binds = SAADC, local=[current_sense,n:i32 = 0],shared =[current],priority=1)]
+    #[task(binds = SAADC, shared = [current,current_sense], priority=3)]
     /// Continuously samples the current.
     fn current_sense(mut cx: current_sense::Context) {
-        let sample = cx.local.current_sense.complete_sample();
-        let mut current = 0.;
+        let sample = cx
+            .shared
+            .current_sense
+            .lock(|sense| sense.complete_sample());
+        let mut current: f32 = 0.;
         if sample[0] > 0.01 {
             current += sample[0];
         }
@@ -653,15 +739,10 @@ mod etc {
         if sample[2] > 0.01 {
             current += sample[2];
         }
-        defmt::info!("Current : {:?}", sample);
+
+        // Here we can optionally set the lowest
         cx.shared.current.lock(|target| {
-            if *target == f32::NEG_INFINITY {
-                *cx.local.n = 0;
-                *target = current;
-                return;
-            }
             *target = current;
         });
-        cx.local.current_sense.start_sample();
     }
 }

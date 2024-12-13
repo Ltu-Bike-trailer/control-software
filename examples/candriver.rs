@@ -2,8 +2,8 @@
 #![no_main]
 #![allow(unused)]
 
+use can_mcp2515::drivers::can::{Mcp2515Driver, Mcp2515Settings};
 use controller as _;
-use controller::drivers::can::{Mcp2515Driver, Mcp2515Settings};
 use cortex_m::asm as _;
 use cortex_m_rt::entry;
 use defmt_rtt as _;
@@ -17,9 +17,8 @@ nrf_rtc0_monotonic!(Mono);
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC0])]
 mod app {
 
-    use controller::{
-        boards::*,
-        drivers::can::{
+    use can_mcp2515::drivers::{
+        can::{
             AcceptanceFilterMask,
             Bitrate,
             Mcp2515Driver,
@@ -31,11 +30,12 @@ mod app {
             CLKPRE,
             RXBN,
         },
+        message::CanMessage,
     };
+    use controller::boards::*;
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};
     use embedded_hal::{digital::OutputPin, spi::SpiBus};
-    use lib::protocol::message::CanMessage;
     use nrf52840_hal::{
         gpio::{self, Floating, Input, Level, Output, Pin, Port, PullUp, PushPull},
         gpiote::{Gpiote, GpioteInputPin},

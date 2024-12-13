@@ -47,14 +47,6 @@ mod app {
         let p1 = nrf52840_hal::gpio::p1::Parts::new(cx.device.P1);
         let ppi = nrf52840_hal::ppi::Parts::new(cx.device.PPI);
 
-        let pins = PinConfig::new(p0, p1, ppi, cx.device.GPIOTE);
-        let (pins, p1) = pins.configure_p1();
-        let (pins, mut p2) = pins.configure_p2();
-        let (pins, p3) = pins.configure_p3();
-        let (pins, current_sense) = pins.configure_adc(cx.device.SAADC);
-        p2.low_side.set_low().unwrap();
-        p2.high_side.set_high().unwrap();
-
         // TODO setup monotonic if used
         // let sysclk = { /* clock setup + returning sysclk as an u32 */ };
         // let token = rtic_monotonics::create_systick_token!();

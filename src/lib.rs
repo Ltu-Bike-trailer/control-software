@@ -19,7 +19,6 @@
     clippy::inline_always,
     incomplete_features
 )]
-
 use core::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(feature = "esc")]
 pub mod bldc;
@@ -29,6 +28,7 @@ use defmt_rtt as _;
 use panic_probe as _;
 pub mod boards;
 pub mod drivers;
+pub mod util;
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message
 // this prevents the panic message being printed *twice* when `defmt::panic` is
@@ -54,14 +54,14 @@ pub fn exit() -> ! {
     }
 }
 
-/// Provides a simple rung buffer. This is used to set reference signals while
+/// Provides a simple ring buffer. This is used to set reference signals while
 /// testing the cart.
-pub struct RingBuffer<T: Sized + Clone + Copy, const N: usize> {
+pub struct RingBuffer<T: Sized + Clone + Default, const N: usize> {
     data: [T; N],
     ptr: usize,
 }
 
-impl<T: Sized + Clone + Copy, const N: usize> RingBuffer<T, N> {
+impl<T: Sized + Clone + Default, const N: usize> RingBuffer<T, N> {
     /// Creates a new ring buffer using the `buffer` provided.
     ///
     /// ## Panics
@@ -76,9 +76,32 @@ impl<T: Sized + Clone + Copy, const N: usize> RingBuffer<T, N> {
             ptr: 0,
         }
     }
+
+    /// Borrows the underlying data.
+    pub const fn borrow_data(&self) -> &[T] {
+        &self.data
+    }
+
+    /// Assigns to the next element in the queue.
+    ///
+    /// ## Panics
+    ///
+    /// This panics if the buffer len is 0.
+    pub fn assign_next(&mut self, new_value: T) {
+        match self.data.get_mut(self.ptr) {
+            Some(value) => {
+                self.ptr += 1;
+                *value = new_value;
+            }
+            _ => {
+                self.ptr = 0;
+                self.data[0] = new_value;
+            }
+        }
+    }
 }
 
-impl<T: Sized + Clone + Copy, const N: usize> Iterator for RingBuffer<T, N> {
+impl<T: Sized + Clone + Copy + Default, const N: usize> Iterator for RingBuffer<T, N> {
     type Item = T;
 
     #[allow(clippy::single_match_else)]

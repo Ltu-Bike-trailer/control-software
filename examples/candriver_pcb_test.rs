@@ -2,8 +2,8 @@
 #![no_main]
 #![allow(unused)]
 
+use can_mcp2515::drivers::can::{Mcp2515Driver, Mcp2515Settings};
 use controller as _;
-use controller::drivers::can::{Mcp2515Driver, Mcp2515Settings};
 use cortex_m::asm as _;
 use cortex_m_rt::entry;
 use defmt_rtt as _;
@@ -15,21 +15,19 @@ use rtic::app;
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC0])]
 mod app {
 
-    use controller::{
-        boards::*,
-        drivers::can::{
-            AcceptanceFilterMask,
-            Bitrate,
-            Mcp2515Driver,
-            Mcp2515Settings,
-            McpClock,
-            OperationTypes,
-            ReceiveBufferMode,
-            SettingsCanCtrl,
-            CLKPRE,
-            RXBN,
-        },
+    use can_mcp2515::drivers::can::{
+        AcceptanceFilterMask,
+        Bitrate,
+        Mcp2515Driver,
+        Mcp2515Settings,
+        McpClock,
+        OperationTypes,
+        ReceiveBufferMode,
+        SettingsCanCtrl,
+        CLKPRE,
+        RXBN,
     };
+    use controller::boards::*;
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};
     use embedded_hal::{digital::OutputPin, spi::SpiBus};
@@ -43,11 +41,7 @@ mod app {
         spim::*,
         Clocks,
     };
-    use rtic_monotonics::nrf::{
-        self,
-        rtc::*,
-        timer::{fugit::ExtU64, Timer0 as Mono},
-    };
+    use rtic_monotonics::{fugit::ExtU64, nrf::timer::TIMER0 as Mono};
 
     #[shared]
     struct Shared {
@@ -155,7 +149,7 @@ mod app {
 
     #[task(binds = GPIOTE, shared = [gpiote], local = [candriver, sender])]
     fn can_interrupt(mut cx: can_interrupt::Context) {
-        let handle = cx.shared.gpiote.lock(|gpiote| {
+        cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
                 defmt::println!("\n");
                 defmt::info!("GPIOTE interrupt occurred - Custom PCB Node [channel 0]");
