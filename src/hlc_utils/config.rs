@@ -67,11 +67,14 @@ impl CanManager {
         spi: SPI,
         gp: GPIOTE,
     ) -> (Pin<Output<PushPull>>, Pin<Input<PullUp>>, Spi<SPI>, Gpiote) {
+        
         let pins = nrf52840_hal::spi::Pins {
             sck: Some(self.spi.sck),
             mosi: Some(self.spi.mosi),
             miso: Some(self.spi.miso),
         };
+
+        
 
         let spi_device = Spi::new(spi, pins, nrf52840_hal::spi::Frequency::M2, MODE_0);
         let gpiote = Gpiote::new(gp);
