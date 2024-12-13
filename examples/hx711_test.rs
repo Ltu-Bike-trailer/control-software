@@ -137,7 +137,7 @@ mod app {
 
     #[task(binds = GPIOTE, shared = [gpiote])]
     fn data_interrupt(mut cx: data_interrupt::Context) {
-        let handle = cx.shared.gpiote.lock(|gpiote| {
+        cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
                 defmt::info!("Analog data received!");
                 read_data::spawn();

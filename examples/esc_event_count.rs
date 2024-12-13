@@ -3,7 +3,13 @@
 //! This uses 3 pwm generators to drive the tansitors. It uses the drive pattern
 //! specified by matlab on some page. It uses the hal effect sensors to detect
 //! which state of the switching pattern we are in.
-#![allow(warnings, dead_code, unused_variables, unreachable_code)]
+#![allow(
+    warnings,
+    dead_code,
+    unused_variables,
+    unreachable_code,
+    clippy::type_complexity
+)]
 #![no_main]
 #![no_std]
 #![feature(type_alias_impl_trait)]
@@ -45,7 +51,7 @@ mod app {
         duty: f32,
         velocity: f32,
     }
-
+    type Pattern = ((bool, bool), (bool, bool), (bool, bool));
     // Local resources go here
     #[local]
     struct Local {
@@ -57,10 +63,8 @@ mod app {
         phase2: Pwm<PWM1>,
         phase3: Pwm<PWM2>,
         drive_pattern: DrivePattern,
-        pattern_sender:
-            rtic_sync::channel::Sender<'static, ((bool, bool), (bool, bool), (bool, bool)), 10>,
-        pattern_receiver:
-            rtic_sync::channel::Receiver<'static, ((bool, bool), (bool, bool), (bool, bool)), 10>,
+        pattern_sender: rtic_sync::channel::Sender<'static, Pattern, 10>,
+        pattern_receiver: rtic_sync::channel::Receiver<'static, Pattern, 10>,
     }
 
     #[init]
@@ -235,7 +239,7 @@ mod app {
                     val = newval;
                 }
                 ((p1h, p1l), (p2h, p2l), (p3h, p3l)) = val;
-                duty = cx.shared.duty.lock(|duty| duty.clone());
+                duty = cx.shared.duty.lock(|duty| *duty);
                 //defmt::info!("ZOOOM");
             } else {
                 /*if duty > 50 {
@@ -338,6 +342,7 @@ mod app {
     #[idle(local=[current_sense],shared = [sender,duty])]
     fn idle(_cx: idle::Context) -> ! {
         defmt::info!("idle");
+        #[allow(clippy::empty_loop)]
         loop {}
     }
 }

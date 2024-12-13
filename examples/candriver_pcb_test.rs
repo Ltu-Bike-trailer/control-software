@@ -149,7 +149,7 @@ mod app {
 
     #[task(binds = GPIOTE, shared = [gpiote], local = [candriver, sender])]
     fn can_interrupt(mut cx: can_interrupt::Context) {
-        let handle = cx.shared.gpiote.lock(|gpiote| {
+        cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
                 defmt::println!("\n");
                 defmt::info!("GPIOTE interrupt occurred - Custom PCB Node [channel 0]");
