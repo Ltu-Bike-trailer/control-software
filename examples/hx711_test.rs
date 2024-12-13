@@ -2,11 +2,7 @@
 #![no_main]
 #![allow(unused)]
 #![feature(generic_arg_infer)]
-<<<<<<< HEAD
-use can_mcp2515::drivers::can::*;
-=======
 use can_mcp2515::drivers::can::{Mcp2515Driver, Mcp2515Settings};
->>>>>>> 522b09b (Esc v2 merge (#35))
 use controller as _;
 use controller::drivers::hx711::*;
 use cortex_m::asm as _;
@@ -22,9 +18,6 @@ nrf_rtc0_monotonic!(Mono);
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC1])]
 mod app {
 
-<<<<<<< HEAD
-    use can_mcp2515::drivers::can::*;
-=======
     use can_mcp2515::drivers::can::{
         AcceptanceFilterMask,
         Bitrate,
@@ -37,7 +30,6 @@ mod app {
         CLKPRE,
         RXBN,
     };
->>>>>>> 522b09b (Esc v2 merge (#35))
     use controller::{boards::*, drivers::hx711::*};
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};

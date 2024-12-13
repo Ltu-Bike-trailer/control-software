@@ -189,7 +189,6 @@ mod app {
     #[task(binds = GPIOTE, shared = [gpiote], local = [candriver, candriver_node, sender])]
     fn can_interrupt(mut cx: can_interrupt::Context) {
         //let can_interrupt::LocalResources {candriver, ..} = cx.local;
-
         cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
                 defmt::println!("\n");
