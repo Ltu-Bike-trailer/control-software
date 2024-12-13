@@ -174,7 +174,7 @@ mod app {
     }
     
     // TODO: Add tasks
-    #[task(priority = 1, local=[saadc, saadc_pin, old_soc, /*curr_soc,*/ can_driver, sender])]
+    #[task(priority = 1, local=[saadc, saadc_pin, old_soc, can_driver, sender])]
     async fn analog_read(cx: analog_read::Context) {
         info!("analog read task started");
 
