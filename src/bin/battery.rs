@@ -8,6 +8,8 @@
 // optimization errors 
 #![allow(dead_code)]
 #![allow(unused_assignments)]
+#![allow(unused_mut)]
+#![allow(unused_imports)]
 
 use controller as _; // global logger + panicking-behavior + memory layout
 
@@ -21,13 +23,8 @@ use controller as _; // global logger + panicking-behavior + memory layout
 )]
 
 mod app {
-   // use core::error::Source;
 
     use defmt::info;
-// use embedded_hal::digital::OutputPin;
-   // use core::arch::asm;
-   // use rtic_monotonics::systick::*;
-
     use controller::drivers::can::{
             Mcp2515Driver,
             Mcp2515Settings,
@@ -35,18 +32,10 @@ mod app {
     use embedded_can::blocking::Can;
 
     use lib::protocol::sender::Sender;
-    use nrf52840_hal::{self as hal,
-        gpio::*,
-        gpiote::Gpiote,
-        pac::SPI0,
-        spi::{Frequency, Spi},
-        //pac::Peripherals,
-        saadc::SaadcConfig,    
-        //Clocks,
+    use nrf52840_hal::{self as hal, gpio::*, gpiote::Gpiote, pac::{saadc, SPI0}, saadc::{Gain, Oversample, Reference, SaadcConfig, Time}, spi::{Frequency, Spi}  
     };
     use rtic_monotonics::systick::*;
 
-    //use crate::Mono;
 
     // Shared resources go here
     #[shared]
@@ -85,23 +74,75 @@ mod app {
         Systick::start(cx.core.SYST, sysclk, token);
 
         // set up saadic(Successive approximation analog-to-digital converter)
-        let saadc_config = SaadcConfig::default();
+        // set up setting for sampling analog signal
+        let mut saadc_config = SaadcConfig::default();
+        saadc_config.reference = Reference::INTERNAL;
+        saadc_config.gain = Gain::GAIN1_6;
+        saadc_config.time = Time::_40US;
+        saadc_config.oversample = Oversample::OVER256X;
+
+        // create new saadc object
         let mut saadc = hal::saadc::Saadc::new(device.SAADC, saadc_config);
+
+        // assign readable pins for saadc
         let mut saadc_pin: p0::P0_31<Input<Floating>> = port0.p0_31.into_floating_input();
+        let mut saadc_pin_0: p0::P0_30<Input<Floating>> = port0.p0_30.into_floating_input();
+        let mut saadc_pin_1: p0::P0_29<Input<Floating>> = port0.p0_29.into_floating_input();
+        let mut saadc_pin_2: p0::P0_28<Input<Floating>> = port0.p0_28.into_floating_input();
         
         // Estimate the current state of charge in battery
-        // TODO add logic to estimate charge using battery temp and voltage 
-        let _saadc_result = saadc.read_channel(&mut saadc_pin).unwrap() as f32;
-        let old_soc: f32 = 0.0;
+        // read analog value from P0.28 and P0.29
 
+        let saadc_result_0 = saadc.read_channel(&mut saadc_pin_0).unwrap() as f32;
+        let saadc_result_1 = saadc.read_channel(&mut saadc_pin_1).unwrap() as f32;
+        let saadc_result_2 = saadc.read_channel(&mut saadc_pin_2).unwrap() as f32;
 
+        // convert analog values to voltage
+        let saadc_to_volt_0 = (saadc_result_0 * 0.6)/((1<<14) as f32 * (1.0/6.0));
+        info!("saadc_to_volt {}", saadc_to_volt_0);
+        let saadc_to_volt_1 = (saadc_result_1 * 0.6)/((1<<14) as f32 * (1.0/6.0));
+        info!("saacd_volt_1 {}", saadc_to_volt_1);
+        let saadc_to_volt_2 = (saadc_result_2 * 0.6)/((1<<14) as f32 * (1.0/6.0));
+        info!("saadc_to_volt_2 {}", saadc_to_volt_2);
 
+        // difference in voltage between P0.28 and P0.29
+        let temp_volt = (saadc_to_volt_1 - saadc_to_volt_2).abs();
+        info!("temp_volt {}", temp_volt);
 
+        // temprature = (-5.8151*current_voltage³ + 24.9708*current_voltage² - 61.8928*current_voltage + 48.8572)
+        let temp = -5.8151*(temp_volt*temp_volt*temp_volt) + 24.9708*(temp_volt*temp_volt) - 61.8928*temp_volt + 48.8572;
+        info!("The tempature is {}", temp);
+
+        // battery voltage Vm = Vb*10k/(150k+10k)
+        let bat_voltage = ((saadc_to_volt_0*(150000.0+10000.0))/10000.0)+1.3;
+        info!("The battery voltage is {}", bat_voltage);
+
+        // battery voltage loss by temp function (approximated from us gov study: https://www.osti.gov/servlets/purl/975252) 
+        let bat_temp_ratio = 0.817 + 9.19*0.001*temp + -4.24*0.00001*temp*temp;
+        info!("The battery tempature ratio is {}", bat_temp_ratio);
+
+        // voltage normailized for 25 degrees
+        let norm = bat_voltage/bat_temp_ratio;
+        info!("The battery voltage normalized for 25 degrees is {}", norm);
+
+        // old soc estimation (linear estimation based on values form https://naturesgenerator.com/blogs/news/lead-acid-battery-voltage-chart?srsltid=AfmBOoqZi_WlVo8OX221jsoNeKqaDMWyDLfuOsrSwsqLOeA4DP-hocwW)
+        let mut old_soc = 0.251*norm -8.7;
+        /* 
+        Might not be needed
+        if old_soc < 0.0 {
+            old_soc = 0.0
+        }
+
+        */
+        info!("Old soc: {}", old_soc);
+        // calculate the first state of charge 
+        //let old_soc: f32 =  norm/bat_loss_func;
+        //info!("The battery has {} state of charge", old_soc);
         // set up state of charge variables
         let curr_soc: f32 = 0.0;
 
         // set up CAN
-        //CAN PINS
+        // CAN PINS
         let can_interrupt = port0.p0_24.into_pullup_input().degrade();
         let cs0: Pin<Output<PushPull>> = port0.p0_20.into_push_pull_output(Level::High).degrade();
         let sck: Pin<Output<PushPull>> = port0.p0_23.into_push_pull_output(Level::Low).degrade();
@@ -136,7 +177,6 @@ mod app {
 
         // create sender to be able to send data via can
         let sender: Sender<_> = Sender::new();
-
 
         (
             Shared {
@@ -187,17 +227,27 @@ mod app {
         }
 
         // Transform ADC to Voltage ((analog_sample * voltage_ref)/resolution)
-        let curr_voltage: f32 = (saadc_result * 3.3)/(1<<14) as f32;
+        let curr_voltage: f32 = ((saadc_result) * 0.6)/((1<<14) as f32 * (1.0/6.0));
         info!("Saadc_result is {}, and curr voltage is {}, ", saadc_result, curr_voltage);
 
         // voltage divider rule to get the volt in (volt_out = volt_in * (R2/(R1+R2)))
         let volt_in = curr_voltage*(4700.0+10000.0)/10000.0;
+        info!("volt in is {}", volt_in);
 
-        // Calculate current in shunt resistor
+        // Calculate current in shunt resistor(0.0335*x + -0.0798)
         let i_shunt = volt_in/(50.0 * 0.003);
-        
+        info!("test {}", i_shunt);
+
         // Calculate current state of charge(curr_soc = old_soc - (i_shunt*delta_t)/Q)
-        curr_soc = *old_soc - i_shunt/60.0 * 0.5;
+        curr_soc = *old_soc - i_shunt/20.0 * 0.5;
+
+        // normalize for temp variations battery state of charge
+        if curr_soc > 1.0{
+            curr_soc = 1.0
+        }
+        if curr_soc < 0.0 {
+            curr_soc = 0.0
+        }
         
         // if the old State of Charge(soc) has lowered by 1% send the new soc via CAN
         if curr_soc < (*old_soc-0.01) {
