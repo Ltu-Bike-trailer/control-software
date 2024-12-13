@@ -2,22 +2,23 @@
 //! "High-Level-Controller.
 #![deny(warnings, missing_docs)]
 #![allow(unused_imports, dead_code)]
+#![allow(clippy::type_complexity)]
 
 use embedded_hal::spi::MODE_0;
 use nrf52840_hal::{
-    gpio::{self, Pin, *},
-    gpiote::*,
+    gpio::{self, p0, p1, Floating, Input, Level, Output, Pin, PullUp, PushPull},
+    gpiote::Gpiote,
     pac::GPIOTE,
     spi::{Instance, Spi},
 };
 
 /// HLC board pins for the SPI interfacing the CAN driver.
 pub struct CanSpi {
-    ///
+    /// Pin for `sck`.
     pub sck: Pin<Output<PushPull>>,
-    ///
+    /// Pin for `mosi`.
     pub mosi: Pin<Output<PushPull>>,
-    ///
+    /// Pin for `miso`.
     pub miso: Pin<Input<Floating>>,
 }
 
@@ -30,6 +31,7 @@ pub struct CanManager {
 
 impl CanManager {
     /// Creates and return the Can pin mapping
+    #[must_use]
     pub fn new(p0: p0::Parts, p1: p1::Parts) -> Self {
         Self {
             spi: CanSpi {
@@ -49,14 +51,11 @@ impl CanManager {
         spi: SPI,
         gp: GPIOTE,
     ) -> (Pin<Output<PushPull>>, Pin<Input<PullUp>>, Spi<SPI>, Gpiote) {
-        
         let pins = nrf52840_hal::spi::Pins {
             sck: Some(self.spi.sck),
             mosi: Some(self.spi.mosi),
             miso: Some(self.spi.miso),
         };
-
-        
 
         let spi_device = Spi::new(spi, pins, nrf52840_hal::spi::Frequency::M2, MODE_0);
         let gpiote = Gpiote::new(gp);

@@ -2,6 +2,9 @@
 //! related to the "High-Level-Controller.
 #![deny(warnings, missing_docs)]
 #![allow(unused_imports, dead_code)]
+#![allow(clippy::option_if_let_else)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::pedantic)]
 
 use core::f32;
 
@@ -44,19 +47,24 @@ pub struct Controller {
     e_prior: usize,
 }
 
+impl Default for Controller {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Controller {
-  
-    /// controller output constants. 
+    /// controller output constants.
     const A: (f32, f32, f32) = (1.271, 0.0289, 0.01832);
-    /// Input constants for controller. 
+    /// Input constants for controller.
     const B: (f32, f32, f32) = (0.3248, 0.4279, 0.1309);
 
-
     #[inline(always)]
+    #[must_use]
     /// Creates a new controller instance with lagged values
     /// for output and input (memory).
     pub const fn new() -> Self {
-        Controller {
+        Self {
             t_output: [0f32; 3],
             e_input: [0f32; 3],
             t_prior: 0,
@@ -65,31 +73,41 @@ impl Controller {
     }
 
     #[inline(always)]
-    /// Equation: 
+    /// Equation:
     /// T(k) =
-    /// 1.271*T(k-1)-0.0289*T(k-2)+0.01832*T(k-3)+0.3248*e(k-1)-0.4279*e(k-2)+0.1309*e(k-3)
+    /// 1.271*T(k-1)-0.0289*T(k-2)+0.01832*T(k-3)+0.3248*e(k-1)-0.4279*e(k-2)+0.
+    /// 1309*e(k-3)
     ///
     /// Where T(k) is output from controller as moment.
     /// While e(k) is the force insignal to the controller (loadcells).
     pub fn actuate(&mut self, error: f32) -> Option<f32> {
-        // self.get_err::<3> is the newest value, and oldest value is self.get_err::<2>. 
-        let ek: (f32, f32, f32) = (self.get_err::<3>(), self.get_err::<1>(), self.get_err::<2>()); 
-        let tk: (f32, f32, f32) = (self.get_moment::<3>(),  self.get_moment::<1>(), self.get_moment::<2>());
-        
+        // self.get_err::<3> is the newest value, and oldest value is self.get_err::<2>.
+        let ek: (f32, f32, f32) = (
+            self.get_err::<3>(),
+            self.get_err::<1>(),
+            self.get_err::<2>(),
+        );
+        let tk: (f32, f32, f32) = (
+            self.get_moment::<3>(),
+            self.get_moment::<1>(),
+            self.get_moment::<2>(),
+        );
+
         let not_ready_e = self.e_input.into_iter().any(|val| val == 0f32);
         let not_ready_t = self.t_output.into_iter().any(|val| val == 0f32);
-        
-        let actuate = Self::A.0 * tk.0 - Self::A.1 * tk.1 + Self::A.2 * tk.2 + Self::B.0 * ek.0 - Self::B.1 * ek.1 + Self::B.2 * ek.2; 
+
+        let actuate = Self::A.0 * tk.0 - Self::A.1 * tk.1 + Self::A.2 * tk.2 + Self::B.0 * ek.0
+            - Self::B.1 * ek.1
+            + Self::B.2 * ek.2;
 
         self.write_moment(actuate);
         self.write_err(error);
-        
+
         if not_ready_e && not_ready_t {
-            // Do nothing wait for all data to be present. 
-            return None;
+            // Do nothing wait for all data to be present.
+            None
         } else {
-            return Some(actuate);
-            
+            Some(actuate)
         }
     }
 
@@ -100,7 +118,6 @@ impl Controller {
             None => {
                 //3 - (N - self.e_prior)
                 self.e_input.len() - (N - self.e_prior)
-
             }
         };
         self.e_input[ptr]
@@ -125,7 +142,7 @@ impl Controller {
     }
 
     #[inline(always)]
-    fn get_moment<const N: usize>(&self) -> f32 {
+    const fn get_moment<const N: usize>(&self) -> f32 {
         let ptr = match self.t_prior.checked_sub(N) {
             Some(val) => val,
             None => 3 - (N - self.t_prior),
@@ -134,16 +151,15 @@ impl Controller {
     }
 }
 
-impl Into<f32> for Constants {
-    fn into(self) -> f32 {
-        match self {
-            Self::A1 => 1.271,
-            Self::A2 => 0.0289,
-            Self::A3 => 0.01832,
-            Self::B1 => 0.3248,
-            Self::B2 => 0.4279,
-            Self::B3 => 0.1309,
+impl From<Constants> for f32 {
+    fn from(val: Constants) -> Self {
+        match val {
+            Constants::A1 => 1.271,
+            Constants::A2 => 0.0289,
+            Constants::A3 => 0.01832,
+            Constants::B1 => 0.3248,
+            Constants::B2 => 0.4279,
+            Constants::B3 => 0.1309,
         }
     }
 }
-
