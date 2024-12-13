@@ -2,8 +2,8 @@
 #![no_main]
 #![allow(unused)]
 
+use can_mcp2515::drivers::can::{Mcp2515Driver, Mcp2515Settings};
 use controller as _;
-use controller::drivers::can::{Mcp2515Driver, Mcp2515Settings};
 use cortex_m::asm as _;
 use cortex_m_rt::entry;
 use defmt_rtt as _;
@@ -15,21 +15,19 @@ use rtic::app;
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC0])]
 mod app {
 
-    use controller::{
-        boards::*,
-        drivers::can::{
-            AcceptanceFilterMask,
-            Bitrate,
-            Mcp2515Driver,
-            Mcp2515Settings,
-            McpClock,
-            OperationTypes,
-            ReceiveBufferMode,
-            SettingsCanCtrl,
-            CLKPRE,
-            RXBN,
-        },
+    use can_mcp2515::drivers::can::{
+        AcceptanceFilterMask,
+        Bitrate,
+        Mcp2515Driver,
+        Mcp2515Settings,
+        McpClock,
+        OperationTypes,
+        ReceiveBufferMode,
+        SettingsCanCtrl,
+        CLKPRE,
+        RXBN,
     };
+    use controller::boards::*;
     use cortex_m::asm;
     use embedded_can::{blocking::Can, Frame, StandardId};
     use embedded_hal::{digital::OutputPin, spi::SpiBus};
@@ -43,11 +41,7 @@ mod app {
         spim::*,
         Clocks,
     };
-    use rtic_monotonics::nrf::{
-        self,
-        rtc::*,
-        timer::{fugit::ExtU64, Timer0 as Mono},
-    };
+    use rtic_monotonics::{fugit::ExtU64, nrf::timer::TIMER0 as Mono};
 
     #[shared]
     struct Shared {

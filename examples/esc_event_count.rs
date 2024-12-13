@@ -73,7 +73,7 @@ mod app {
         let p1 = nrf52840_hal::gpio::p1::Parts::new(cx.device.P1);
         let ppi = nrf52840_hal::ppi::Parts::new(cx.device.PPI);
 
-        let pins = PinConfig::new(p0, p1, ppi, cx.device.GPIOTE);
+        let pins = PinConfig::new(p0, p1, ppi, cx.device.GPIOTE, cx.device.SPI0);
         let (pins, p1) = pins.configure_p1();
         let (pins, p2) = pins.configure_p2();
         let (pins, p3) = pins.configure_p3();
