@@ -3,14 +3,14 @@
 //! This is a dead simple protocol a typical message is defined by a
 //! [`Message identifier`](constants::Message) and a single f32.
 pub mod constants;
-pub mod message;
+//pub mod message;
 pub mod sender;
 
+use can_mcp2515::drivers::message;
 #[allow(clippy::enum_glob_use)]
 use constants::{InvalidMessageId, Message::*};
 use embedded_can::{Frame, Id};
 use message::CanMessage;
-
 /// Denotes all of the supported message types.
 #[derive(Clone, Debug)]
 pub enum MessageType {

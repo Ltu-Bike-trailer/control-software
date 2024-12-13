@@ -31,16 +31,15 @@ nrf_timer4_monotonic!(Mono, 16_000_000);
 )]
 mod etc {
 
+    use can_mcp2515::drivers::can::{AcceptanceFilterMask, CanInte, Mcp2515Driver};
     use controller::{
         bldc::{DrivePattern, FloatDuty, Pattern},
         cart::{
             self,
             constants::{DURATION, KD, KI, KP, MIN_DUTY, RANGE},
         },
-        drivers::can::{AcceptanceFilterMask, CanInte, Mcp2515Driver, Mcp2515Settings},
         RingBuffer,
     };
-    use embedded_can::blocking::Can;
     use esc::{self, events::GpioEvents, PinConfig};
     use lib::protocol::{self, message::CanMessage, MessageType, WriteType};
     use nrf52840_hal::{
@@ -83,7 +82,7 @@ mod etc {
         drive_pattern: DrivePattern,
         control_loop_timer: nrf52840_hal::timer::Timer<TIMER3, OneShot>,
         buffer: RingBuffer<f32, 15>,
-        can: Mcp2515Driver<Spi<SPI0>, P1_08<Output<PushPull>>>,
+        can: Mcp2515Driver<Spi<SPI0>, P1_08<Output<PushPull>>, Pin<Input<PullUp>>>,
         can_event_sender: rtic_sync::channel::Sender<'static, Option<CanMessage>, 10>,
         can_event_receiver: rtic_sync::channel::Receiver<'static, Option<CanMessage>, 10>,
         can_receive_sender: rtic_sync::channel::Sender<'static, CanMessage, 10>,
@@ -117,18 +116,24 @@ mod etc {
         let (pins, current_sense) = pins.configure_adc(cx.device.SAADC);
 
         defmt::trace!("Init: SPI");
-        let (pins, (spi, _int_pin, cs)) = pins.configure_spi();
+        let (pins, (spi, int_pin, cs)) = pins.configure_spi();
         defmt::trace!("Init: CAN driver");
-        let can = controller::drivers::can::Mcp2515Driver::init(
+        let can = can_mcp2515::drivers::can::Mcp2515Driver::init(
             spi,
             cs,
+            int_pin,
             // Only accept messages for the left motor.
-            Mcp2515Settings::default()
-                .enable_interrupt(CanInte::RX0IE)
+            can_mcp2515::drivers::can::Mcp2515Settings::default()
+                .enable_interrupts(&[
+                    CanInte::RX0IE,
+                    CanInte::TX0IE,
+                    CanInte::TX1IE,
+                    CanInte::TX2IE,
+                ])
                 // All bits have to match a left motor message.
                 .filter_b0(AcceptanceFilterMask::new(
                     0x7FF,
-                    lib::protocol::constants::Message::LeftMotor as u16,
+                    lib::protocol::constants::Message::SetMotorReference as u16,
                 ))
                 // All bits have to match 0x0
                 .filter_b1(AcceptanceFilterMask::new(0x7FF, 0)),
@@ -267,10 +272,6 @@ mod etc {
     /// necessary values to be able to compute the angular velocity and sets
     /// the shared variables. Moreover, it gets the latest pattern and updates
     /// the shared pattern.
-    ///
-    /// ## Can buss
-    ///
-    /// TODO
     fn handle_gpio(mut cx: handle_gpio::Context) {
         let now = Mono::now();
         let mut dt = None;
@@ -327,13 +328,9 @@ mod etc {
         let mut queue = lib::protocol::sender::Sender::new();
         while let Ok(message) = cx.local.can_event_receiver.recv().await {
             if message.is_none() {
-                while !cx.local.can.interrupt_is_cleared() {
-                    let event_code = match cx.local.can.interrupt_decode() {
-                        Ok(code) => code,
-                        // We do not have time for recovery here
-                        Err(_) => continue,
-                    };
-                    if let Some(message) = cx.local.can.handle_interrupt(event_code) {
+                let events = cx.local.can.interrupt_manager();
+                while let Some(event) = events.next() {
+                    if let Some(message) = event.handle() {
                         let de: MessageType = match MessageType::try_from(&message) {
                             Ok(val) => val,
                             Err(_) => continue,
