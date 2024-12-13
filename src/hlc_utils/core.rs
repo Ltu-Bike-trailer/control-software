@@ -34,7 +34,11 @@ enum Constants {
 }
 
 /// This represent the Controller, that takes force as input,
+<<<<<<< HEAD
 /// and send moment output to motor as output torque.
+=======
+/// and send torque output to motor as output.
+>>>>>>> d3bcbce (rebasing with main)
 ///
 /// The equation for the discrete controller, takes three
 /// past/lagging values for the input and output.
@@ -47,12 +51,15 @@ pub struct Controller {
     e_prior: usize,
 }
 
+<<<<<<< HEAD
 impl Default for Controller {
     fn default() -> Self {
         Self::new()
     }
 }
 
+=======
+>>>>>>> d3bcbce (rebasing with main)
 impl Controller {
     /// controller output constants.
     const A: (f32, f32, f32) = (1.271, 0.0289, 0.01832);
@@ -60,7 +67,10 @@ impl Controller {
     const B: (f32, f32, f32) = (0.3248, 0.4279, 0.1309);
 
     #[inline(always)]
+<<<<<<< HEAD
     #[must_use]
+=======
+>>>>>>> d3bcbce (rebasing with main)
     /// Creates a new controller instance with lagged values
     /// for output and input (memory).
     pub const fn new() -> Self {
@@ -71,6 +81,7 @@ impl Controller {
             e_prior: 0,
         }
     }
+<<<<<<< HEAD
 
     #[inline(always)]
     /// Equation:
@@ -112,12 +123,33 @@ impl Controller {
     }
 
     #[inline(always)]
+=======
+
+    #[inline(always)]
+    ///
+    pub fn actuate(&mut self, output_torque: f32, error: f32) -> f32 {
+        let _ek1 = self.get_err::<1>();
+
+        // Do things
+        //
+        self.write_torque(output_torque);
+        self.write_err(error);
+        unimplemented!();
+    }
+
+    #[inline(always)]
+>>>>>>> d3bcbce (rebasing with main)
     const fn get_err<const N: usize>(&self) -> f32 {
         let ptr = match self.e_prior.checked_sub(N) {
             Some(val) => val,
             None => {
+<<<<<<< HEAD
                 //3 - (N - self.e_prior)
                 self.e_input.len() - (N - self.e_prior)
+=======
+                // 2, 1, 0, then wrap to 0 ... idx
+                3 - (N - self.e_prior)
+>>>>>>> d3bcbce (rebasing with main)
             }
         };
         self.e_input[ptr]
@@ -133,7 +165,11 @@ impl Controller {
     }
 
     #[inline(always)]
+<<<<<<< HEAD
     fn write_moment(&mut self, torque: f32) {
+=======
+    fn write_torque(&mut self, torque: f32) {
+>>>>>>> d3bcbce (rebasing with main)
         self.t_prior += 1;
         if self.t_prior >= 3 {
             self.t_prior = 0;
@@ -142,7 +178,11 @@ impl Controller {
     }
 
     #[inline(always)]
+<<<<<<< HEAD
     const fn get_moment<const N: usize>(&self) -> f32 {
+=======
+    fn get_torque<const N: usize>(&self) -> f32 {
+>>>>>>> d3bcbce (rebasing with main)
         let ptr = match self.t_prior.checked_sub(N) {
             Some(val) => val,
             None => 3 - (N - self.t_prior),

@@ -56,7 +56,6 @@ mod app {
     use rtic_monotonics::{fugit::ExtU64, nrf::timer::TIMER0 as Mono};
 >>>>>>> 522b09b (Esc v2 merge (#35))
 
-
     #[shared]
     struct Shared {
         gpiote: Gpiote,
