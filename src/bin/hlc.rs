@@ -11,7 +11,7 @@ use panic_probe as _;
 use rtic_monotonics::nrf::timer::prelude::*;
 nrf_timer4_monotonic!(Mono, 16_000_000);
 
-#[rtic::app(device = nrf52840_hal::pac, dispatchers = [RTC1, TIMER0, TIMER1])]
+#[rtic::app(device = nrf52840_hal::pac, dispatchers = [TIMER0, TIMER1, TIMER2])]
 mod hlc {
 
     use can_mcp2515::drivers::{can::*, message::CanMessage};
@@ -38,10 +38,12 @@ mod hlc {
             Pin,
             PullUp,
             PushPull,
-        }, gpiote::{self, Gpiote}, pac::{SPI0, TIMER2, TIMER3}, pwm::{Channel, Pwm}, saadc::{self, SaadcConfig, SaadcTask, Time}, spi::{Frequency, Spi}, spim::*, time::U32Ext, timer::Periodic, Clocks, Timer
+        }, gpiote::{self, Gpiote}, pac::{RTC0, SPI0, TIMER2, TIMER3}, pwm::{Channel, Prescaler, Pwm}, rtc::{RtcCompareReg, RtcInterrupt}, saadc::{self, SaadcConfig, SaadcTask, Time}, spi::{Frequency, Spi}, spim::*, time::U32Ext, timer::Periodic, Clocks, Rtc, Timer
     };
     use rtic_monotonics::{
-        fugit::{ExtU32, ExtU64}, rtic_time::monotonic::TimerQueueBasedInstant, Monotonic
+        fugit::{ExtU32, ExtU64},
+        rtic_time::monotonic::TimerQueueBasedInstant,
+        Monotonic,
     };
     use rtic_sync::{
         channel::{self, *},
@@ -57,6 +59,7 @@ mod hlc {
         gpiote: Gpiote,
         sender: Sender<10>,
         stype: SaadcTask<1>,
+        can_rx:bool,
     }
 
     #[local]
@@ -67,7 +70,8 @@ mod hlc {
         control_reference_sender: channel::Sender<'static, Option<CanMessage>, 100>,
         can_receiver: channel::Receiver<'static, Option<CanMessage>, 100>,
         hlc_controller: Controller,
-        control_timer:Timer<TIMER3>
+        control_timer: Timer<TIMER3>,
+        can_thing:Rtc<RTC0>
     }
 
     #[init]
@@ -78,7 +82,7 @@ mod hlc {
         let port1 = gpio::p1::Parts::new(device.P1);
 
         let t = nrf52840_hal::pac::Peripherals::take();
-        let clk = Clocks::new(device.CLOCK);
+        let clk = Clocks::new(device.CLOCK).start_lfclk();
         Mono::start(device.TIMER4);
 
         defmt::println!("Initialize the SPI instance, and CanDriver");
@@ -170,20 +174,20 @@ mod hlc {
         control_timer.enable_interrupt();
         let mut control_timer = control_timer.into_oneshot();
         control_timer.timeout::<1, 1000>(20u64.millis());
-        //control_timer.start(25u32.millis());
-        let time = Mono::now().duration_since_epoch().to_micros();
-        defmt::info!("{}", time);
-        let time = Mono::now().duration_since_epoch().to_micros();
-        defmt::info!("{}", time);
-        let time = Mono::now().duration_since_epoch().to_micros();
-        defmt::info!("{}", time);
 
+
+        let mut can_thing = nrf52840_hal::rtc::Rtc::new(device.RTC0, 1).unwrap();
+        can_thing.enable_event(RtcInterrupt::Compare0);
+        can_thing.enable_interrupt(RtcInterrupt::Compare0,None);
+        can_thing.set_compare(RtcCompareReg::Compare0, 100);//655);
+        can_thing.enable_counter();
+        //control_timer.start(25u32.millis());
 
         //Start sampeling the stype
         adc.start_sample();
         read_hx711::spawn();
-        handle_can::spawn();
-        controller_output::spawn();
+        //handle_can::spawn();
+        //controller_output::spawn();
 
         assert!(Mono::now().ticks() != 0);
 
@@ -194,6 +198,7 @@ mod hlc {
                 cargo_weight: f32::NEG_INFINITY,
                 s_type_force: f32::NEG_INFINITY,
                 stype: adc,
+                can_rx:false,
             },
             Local {
                 hx711: hx711_instance,
@@ -201,8 +206,9 @@ mod hlc {
                 can_sender: control_reference_sender,
                 can_receiver: receive,
                 hlc_controller: Controller::new(),
-                control_reference_sender:send,
-                control_timer
+                control_reference_sender: send,
+                control_timer,
+                can_thing,
             },
         )
     }
@@ -216,13 +222,13 @@ mod hlc {
         }
     }
 
-    #[task(binds = GPIOTE, shared = [gpiote, sender], local = [can_sender], priority = 4)]
+    #[task(binds = GPIOTE, shared = [gpiote, sender,can_rx], local = [can_sender], priority = 4)]
     fn can_interrupt(mut cx: can_interrupt::Context) {
         cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
                 defmt::println!("\n");
                 defmt::info!("GPIOTE interrupt occurred [channel 0] - Can Master!");
-
+                cx.shared.can_rx.lock(|rx| *rx = true);
                 let _ = cx.local.can_sender.try_send(None);
                 gpiote.channel0().reset_events();
 
@@ -231,12 +237,20 @@ mod hlc {
         });
     }
 
-    #[task(priority = 3, local = [candriver, can_receiver])]
-    async fn handle_can(mut cx: handle_can::Context) {
-        defmt::info!("hello");
-        //let can_interrupt::LocalResources { candriver, .. } = cx.local;
-        while let Ok(frame) = cx.local.can_receiver.recv().await {
-            defmt::info!("handle_can entry: {}", Debug2Format(&frame));
+    #[task(binds = RTC0, priority = 3, local = [candriver, can_receiver,can_thing], shared = [sender,can_rx])]
+    fn handle_can(mut cx: handle_can::Context) {
+            defmt::warn!("Can frames???");
+        cx.local.can_thing.clear_counter();
+        cx.local.can_thing.reset_event(RtcInterrupt::Compare0);
+
+        let msg = cx.shared.sender.lock(|sender| sender.dequeue());
+        
+        if let Some(msg) = msg {
+            defmt::warn!("SENDING CAN FRAME???");
+            cx.local.candriver.transmit(&msg);
+        }
+
+        if cx.shared.can_rx.lock(|rx| {let new_rx = *rx; *rx = false; new_rx}) {
             let mut manager = cx.local.candriver.interrupt_manager();
             let mut received_message = None;
             while let Some(event) = manager.next() {
@@ -248,11 +262,33 @@ mod hlc {
                     };
                 }
             }
-            if let Some(frame) = frame {
-                defmt::info!("Sending frame: {}", Debug2Format(&frame));
-                cx.local.candriver.transmit(&frame);
-            }
         }
+
+
+        cx.local.can_thing.clear_counter();
+
+
+        //defmt::info!("hello");
+        ////let can_interrupt::LocalResources { candriver, .. } = cx.local;
+        //while let Ok(frame) = cx.local.can_receiver.recv().await {
+        //    defmt::info!("handle_can entry");
+        //    let mut manager = cx.local.candriver.interrupt_manager();
+        //    let mut received_message = None;
+        //    while let Some(event) = manager.next() {
+        //        if let Some(frame) = event.handle() {
+        //            received_message = Some(frame);
+        //            let msg_type = match MessageType::try_from(&frame) {
+        //                Ok(msg) => msg,
+        //                Err(_) => continue,
+        //            };
+        //        }
+        //    }
+        //    if let Some(frame) = frame {
+        //        //defmt::info!("Sending frame: {}", Debug2Format(&frame));
+        //        defmt::info!("Sending frame :)");
+        //        cx.local.candriver.transmit(&frame);
+        //    }
+        //}
     }
 
     /// Should process the MessageType channel, and distribute to specific
@@ -273,10 +309,7 @@ mod hlc {
     ///High priority constant polling of S-Type loadcell
     #[task(binds = SAADC, shared =[s_type_force,stype], priority=2)]
     fn read_stype(mut cx: read_stype::Context) {
-        let [sample] = cx.shared.stype.lock(|s_type| {
-        
-            s_type.complete_sample(conv)
-        });
+        let [sample] = cx.shared.stype.lock(|s_type| s_type.complete_sample(conv));
 
         // Scale in between.
         const GAIN: f32 = 10.;
@@ -284,8 +317,7 @@ mod hlc {
 
         cx.shared.s_type_force.lock(|f| *f = converted);
         defmt::trace!("Measured {}N", converted);
-        cx.shared.stype.lock(|stype| stype.start_sample());
-
+        //cx.shared.stype.lock(|stype| stype.start_sample());
     }
 
     ///Lowest priority task. Expected to be static during operation but needs
@@ -312,30 +344,40 @@ mod hlc {
         }
     }
 
-    #[task(local = [hlc_controller, control_reference_sender,control_timer], shared = [s_type_force,stype], priority = 5)]
-    async fn controller_output(mut cx: controller_output::Context) {
-        defmt::info!("CTRL");
+    #[task(binds =TIMER3, local = [hlc_controller, control_reference_sender,control_timer], shared = [s_type_force,stype, sender], priority = 5)]
+    fn controller_output(mut cx: controller_output::Context) {
         let mut time = Mono::now();
-        defmt::info!("Got time :)");
+        cx.local.control_timer.reset_event();
 
-        loop {
-            defmt::info!("LOOPTILOOP");
-            cx.shared.s_type_force.lock(|input_force| {
-            defmt::info!("WHAT IS THIS??");
-                while let Some(actuate) = cx.local.hlc_controller.actuate(*input_force) {
-                    defmt::info!("Actuate: {}", actuate);
-                    let actuate_frame: CanMessage = WriteType::MotorReference { target: actuate, deadline: 30}.into();
-                    cx.local.control_reference_sender.try_send(Some(actuate_frame)).unwrap();
-                }
-            });
-            defmt::info!("After lock");
+            if let Some(actuate) = cx
+                .shared
+                .s_type_force
+                .lock(|input_force| cx.local.hlc_controller.actuate(*input_force))
+            {
+                //defmt::info!("Actuate: {}", actuate);
+                let actuate_frame=lib::protocol::MessageType::Write(WriteType::MotorReference {
+                    target: actuate,
+                    deadline: 30,
+                });
+                cx.shared
+                    .sender.lock(|sender| sender.enqueue(actuate_frame));
+                    //.try_send(Some(actuate_frame))
+                    //.unwrap();
+                defmt::info!("Should have sent now....");
+            }
+            else {
+                defmt::warn!(":/");
+            }
 
             //cx.shared.stype.lock(|stype| stype.start_sample());
             //Mono::delay_until(time + 20u64.millis()).await;
-            defmt::info!("Adc sample!");
-            Mono::delay(20u64.millis()).await;
-            defmt::info!("After delay!");
-            time = Mono::now();
-        }
+            //defmt::info!("Adc sample!");
+            //Mono::delay(20u64.millis()).await;
+            //Mono::delay_ms(&mut Mono, 20);
+            cx.local.control_timer.timeout((time + 20u64.millis()) - Mono::now());
+            cx.shared.stype.lock(|stype| stype.start_sample());
+
+            //defmt::info!("After delay!");
+            //time = Mono::now();
     }
 }
