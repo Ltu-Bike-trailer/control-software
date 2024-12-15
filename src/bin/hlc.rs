@@ -368,7 +368,7 @@ mod hlc {
             .s_type_force
             .lock(|input_force| cx.local.hlc_controller.actuate(*input_force))
         {
-                defmt::info!("Actuate: {}", actuate);
+            defmt::info!("Actuate: {}", actuate);
 
             //defmt::info!("Actuate: {}", actuate);
             let actuate_frame = lib::protocol::MessageType::Write(WriteType::MotorReference {
