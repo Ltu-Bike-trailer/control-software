@@ -2,7 +2,7 @@
 
 #![no_main]
 #![no_std]
-#![feature(async_fn_traits, generic_const_exprs, async_closure)]
+#![feature(async_fn_traits, generic_const_exprs)]
 #![deny(
     warnings,
     missing_docs,

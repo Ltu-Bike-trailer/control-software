@@ -126,6 +126,7 @@ impl Controller {
 
     #[inline(always)]
     fn write_err(&mut self, err: f32) {
+        let err = err.clamp(-100., 100.);
         self.e_prior += 1;
         if self.e_prior >= 3 {
             self.e_prior = 0;
@@ -135,11 +136,12 @@ impl Controller {
 
     #[inline(always)]
     fn write_moment(&mut self, torque: f32) {
+        let moment = torque.clamp(-2.0, 2.0);
         self.t_prior += 1;
         if self.t_prior >= 3 {
             self.t_prior = 0;
         }
-        self.t_output[self.t_prior] = torque;
+        self.t_output[self.t_prior] = moment;
     }
 
     #[inline(always)]

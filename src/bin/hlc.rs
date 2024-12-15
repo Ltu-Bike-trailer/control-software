@@ -326,10 +326,22 @@ mod hlc {
         let [sample] = cx.shared.stype.lock(|s_type| s_type.complete_sample(conv));
 
         // Scale in between.
-        const GAIN: f32 = 10.;
-        let converted = GAIN * sample;
+        const GAIN: f32 = 50.;
+        const OFFSET: f32 = 1.700;
+        const LOADCELL_GAIN: f32 = 0.019984;
+        const VOLTAGE_DIV: f32 = 0.68;
+        const K: f32 = GAIN * LOADCELL_GAIN * VOLTAGE_DIV;
+        const K_NEWTON: f32 = K / (200.0 * 9.82);
+        const FORCE_INV: f32 = (1.0 / K_NEWTON);
+        let converted: f32 = FORCE_INV * sample - (OFFSET / K_NEWTON);
+        let mut converted_avg: f32 = 0.0;
+        //let converted = GAIN * sample;
 
-        cx.shared.s_type_force.lock(|f| *f = converted);
+        cx.shared.s_type_force.lock(|f| {
+            //converted_avg = (converted + *f) / 2.0 ;
+            //*f = (converted + *f ) / 2.0;
+            *f = converted;
+        });
         defmt::trace!("Measured {}N", converted);
         //cx.shared.stype.lock(|stype| stype.start_sample());
     }

@@ -60,7 +60,9 @@ pub const fn sensor_gain() -> f32 {
 #[inline(always)]
 #[must_use]
 pub fn conv(val: u16) -> f32 {
-    2.5 / sensor_gain() - f32::from(val) * raw_adc_to_current_factor() / sensor_gain()
+    //2.5 / sensor_gain() - f32::from(val) * raw_adc_to_current_factor() /
+    // sensor_gain()
+    (V_REF / (ADC_GAIN * (1 << ADC_BITS) as f32)) * val as f32
 }
 
 /// Converts the adc gain to the type representation at compile time.
