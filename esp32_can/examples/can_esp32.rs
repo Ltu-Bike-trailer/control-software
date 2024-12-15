@@ -1,7 +1,6 @@
-use esp32_can as _;
-use esp32_can::drivers::{
-    can::{Mcp2515Driver, Mcp2515Settings,AcceptanceFilterMask, Bitrate, McpClock, OperationTypes, ReceiveBufferMode, SettingsCanCtrl, CLKPRE},
-    message::CanMessage};
+use can_mcp2515::drivers::{can::*, message::*};
+use lib::*;
+use protocol::{CurrentMeasurement, FixedLogType, MotorSubSystem, VelocityInfo, WriteType};
 
 use embedded_hal::digital::{InputPin, OutputPin, *};
 use embedded_can::{blocking::Can, StandardId};
@@ -105,24 +104,29 @@ fn main() -> anyhow::Result<(), anyhow::Error>{
     //frame.print_frame();
     //let _ = can_driver.transmit(&frame);
 
-    loop {
-        if can_driver.interrupt_pin.is_low(){
-            let interrupt_type = can_driver.interrupt_decode().unwrap();
-            if let Some(frame) = can_driver.handle_interrupt(interrupt_type) {
-               // Consume frame here:
-               //let _ = can_driver.transmit(&frame);
-                //FreeRtos::delay_ms(200);
 
-           }
-           if can_driver.interrupt_is_cleared(){
-               log::info!("All interrupt is cleared!");
-           }else{
-                //let interrupt_type = can_driver.interrupt_decode().unwrap();
-                //can_driver.handle_interrupt(interrupt_type);
-           }
-           //can_driver.interrupt_pin.enable_interrupt()?;
+     loop {
+        //esp_idf_svc::hal::delay::FreeRtos::delay_ms(1000); // Send message every 1000ms
 
-        }else{
+        if can_driver.interrupt_pin.is_low() {
+            info!("GOT INTERRUPT!!!");
+            while !can_driver.interrupt_is_cleared(){
+                let interrupt_type = can_driver.interrupt_decode().unwrap();
+                info!("type: {:?}", interrupt_type);
+                if let Some(frame) = can_driver.handle_interrupt(interrupt_type) {
+                    let msg_type = protocol::MessageType::try_from(&frame).unwrap();
+                    info!("Can: {:?}", msg_type);
+                }
+            }
+            if can_driver.interrupt_is_cleared() {
+                log::info!("All interrupt is cleared!");
+            } else {
+                let interrupt_type = can_driver.interrupt_decode().unwrap();
+                can_driver.handle_interrupt(interrupt_type);
+            }
+            //can_driver.interrupt_pin.enable_interrupt()?;
+        } else {
+            info!("Got nothing");
             FreeRtos::delay_ms(100);
         }
     }
