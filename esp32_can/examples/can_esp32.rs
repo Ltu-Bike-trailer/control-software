@@ -1,6 +1,6 @@
 use can_mcp2515::drivers::{can::*, message::*};
 use lib::*;
-use protocol::{CurrentMeasurement, FixedLogType, MotorSubSystem, VelocityInfo, WriteType};
+use protocol::{sender::Sender, CurrentMeasurement, FixedLogType, MotorSubSystem, VelocityInfo, WriteType};
 
 use embedded_hal::digital::{InputPin, OutputPin, *};
 use embedded_can::{blocking::Can, StandardId};
@@ -97,17 +97,23 @@ fn main() -> anyhow::Result<(), anyhow::Error>{
     log::info!("MCP2515 Driver was successfully created!");
 
     //Ok(())
-    
+    let mut sender: Sender<10> = Sender::new();
     let dummy_id = StandardId::new(0x1).unwrap();
     let mut frame = CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02,
         0x03]).unwrap();
+    sender.set_left_motor(1.1).unwrap();
+    sender.set_left_motor(2.3).unwrap();
+    let frme = sender.dequeue().unwrap();
+    let frmeee = sender.dequeue().unwrap();
     //frame.print_frame();
     //let _ = can_driver.transmit(&frame);
 
 
      loop {
         
-        let _ = can_driver.transmit(&frame);
+        let _ = can_driver.transmit(&frme);
+        let _ = can_driver.transmit(&frmeee);
+
         //esp_idf_svc::hal::delay::FreeRtos::delay_ms(1000); // Send message every 1000ms
         /*
         if can_driver.interrupt_pin.is_low() {
