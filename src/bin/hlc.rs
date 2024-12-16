@@ -14,6 +14,7 @@ nrf_timer4_monotonic!(Mono, 16_000_000);
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [TIMER0, TIMER1, TIMER2])]
 mod hlc {
 
+
     use can_mcp2515::drivers::{can::*, message::CanMessage};
     use controller::{
         boards::*,
@@ -21,23 +22,14 @@ mod hlc {
         hlc_utils::{config::*, core::*, events::*, stype_calibration::*},
     };
     use cortex_m::asm;
-    use defmt::Debug2Format;
+    use defmt::{panic, Debug2Format};
     use delay::DelayNs;
     use embedded_can::{blocking::Can, StandardId};
     use embedded_hal::*;
     use lib::protocol::{constants::*, sender::Sender, MessageType, WriteType};
     use nrf52840_hal::{
         gpio::{
-            self,
-            p0::P0_04,
-            Disconnected,
-            Floating,
-            Input,
-            Level,
-            Output,
-            Pin,
-            PullUp,
-            PushPull,
+            self, p0::P0_04, Disconnected, Floating, Input, Level, Output, Pin, PullDown, PullUp, PushPull
         },
         gpiote::{self, Gpiote},
         pac::{RTC0, SPI0, TIMER2, TIMER3},
@@ -93,24 +85,24 @@ mod hlc {
         let port0 = gpio::p0::Parts::new(device.P0);
         let port1 = gpio::p1::Parts::new(device.P1);
 
-        let t = nrf52840_hal::pac::Peripherals::take();
-        let clk = Clocks::new(device.CLOCK).start_lfclk();
+        //let t = nrf52840_hal::pac::Peripherals::take();
+        let clk = Clocks::new(device.CLOCK).start_lfclk().enable_ext_hfosc();
         Mono::start(device.TIMER4);
 
         defmt::println!("Initialize the SPI instance, and CanDriver");
         let pins = nrf52840_hal::spi::Pins {
             sck: Some(port0.p0_05.into_push_pull_output(Level::Low).degrade()),
             mosi: Some(port0.p0_02.into_push_pull_output(Level::Low).degrade()),
-            miso: Some(port0.p0_28.into_floating_input().degrade()),
+            miso: Some(port0.p0_20.into_floating_input().degrade()),
         };
 
         //let can_manager = CanManager::new(port0, port1);
         //let (cs_pin, int_pin, spi, gpiote) =
         // can_manager.peripheral_instances(device.SPI0, device.GPIOTE);
-        let cs_pin = port1.p1_02.into_push_pull_output(Level::High).degrade();
-        let can_interrupt = port1.p1_15.into_pullup_input().degrade();
+        let cs_pin = port1.p1_08.into_push_pull_output(Level::High).degrade();
+        let can_interrupt = port0.p0_28.into_pullup_input().degrade();
 
-        let mut spi = Spi::new(device.SPI0, pins, Frequency::M1, MODE_0);
+        let mut spi = Spi::new(device.SPI0, pins, Frequency::M2, MODE_0);
         let mut gpiote = Gpiote::new(device.GPIOTE);
 
         const CLKEN: bool = true;
@@ -130,18 +122,27 @@ mod hlc {
             OSM,
         );
 
+        
         let mut can_settings = Mcp2515Settings::default().enable_interrupts(&[
-            CanInte::MERRE,
-            CanInte::ERRIE,
-            CanInte::TX2IE,
-            CanInte::TX1IE,
-            CanInte::TX0IE,
             CanInte::RX1IE,
             CanInte::RX0IE,
         ]);
 
-        let mut can_driver = Mcp2515Driver::init(spi, cs_pin, can_interrupt, can_settings);
+        can_settings.filter_b0(DEFAULT_FILTER_MASK, DEFAULT_FILTER_MASK);
+        can_settings.filter_b1(DEFAULT_FILTER_MASK, DEFAULT_FILTER_MASK);
 
+        defmt::info!("Interrupts: {:#08b}", can_settings.interrupts);
+
+        let mut can_driver = Mcp2515Driver::init(spi, cs_pin, can_interrupt, can_settings);
+       
+        
+        if true {
+        match can_driver.read_caninte() {
+            Ok(val) => defmt::info!("Caninte {:#08b}",val),
+            Err(_)=> panic!("Caninte read failed"),
+        }
+        }
+        
         gpiote
             .channel0()
             .input_pin(&can_driver.interrupt_pin)
@@ -171,7 +172,7 @@ mod hlc {
         cfg.reference = saadc::Reference::INTERNAL;
 
         // The input pin.
-        let input = port0.p0_04;
+        //let input = port0.p0_04;
 
         //This is probably wrong is some way taken directly from S-type calibration
         // and modified
@@ -235,6 +236,7 @@ mod hlc {
 
     #[task(binds = GPIOTE, shared = [gpiote, sender,can_rx], local = [can_sender], priority = 4)]
     fn can_interrupt(mut cx: can_interrupt::Context) {
+        defmt::info!("before lock!");
         cx.shared.gpiote.lock(|gpiote| {
             if (gpiote.channel0().is_event_triggered()) {
                 defmt::println!("\n");
@@ -258,7 +260,7 @@ mod hlc {
 
         if let Some(msg) = msg {
             //defmt::warn!("SENDING CAN FRAME???");
-            cx.local.candriver.transmit(&msg);
+            //cx.local.candriver.transmit(&msg);
         }
 
         if cx.shared.can_rx.lock(|rx| {
@@ -266,17 +268,38 @@ mod hlc {
             *rx = false;
             new_rx
         }) {
+        
+        
+         //if true {
+         //       panic!("Can RX!")
+         //   }
             defmt::info!("Can RX!");
-            let mut manager = cx.local.candriver.interrupt_manager();
-            let mut received_message = None;
-            while let Some(event) = manager.next() {
-                if let Some(frame) = event.handle() {
-                    received_message = Some(frame);
+            //let mut manager = cx.local.candriver.interrupt_manager();
+            //let mut received_message = None;
+            //while let Some(event) = manager.next() {
+            while !cx.local.candriver.interrupt_is_cleared() {
+                let interrupt_type = cx.local.candriver.interrupt_decode().unwrap();
+                if let Some(frame) = cx.local.candriver.handle_interrupt(interrupt_type) {
+                    //let msg_type = MessageType::try_from(&frame);
+                    defmt::info!("Frame: {}", frame.clone().data);
+                }
+                //defmt::warn!("Got event! {:#04b} Some other cool text", event.event_code as u8);
+                //if let Some(frame) = event.handle() {
+                //    received_message = Some(frame);
+                    //defmt::info!("")
+                    /*
                     let msg_type = match MessageType::try_from(&frame) {
-                        Ok(msg) => msg,
+                        Ok(msg) =>{
+                            received_message = Some(msg);
+                            break;
+                        },
                         Err(_) => continue,
                     };
-                }
+                    */
+                //}
+            }
+            if true {
+                panic!(":()");
             }
         }
 
@@ -321,13 +344,25 @@ mod hlc {
     //}
 
     ///High priority constant polling of S-Type loadcell
-    #[task(binds = SAADC, shared =[s_type_force,stype], priority=2)]
+    #[task(binds = SAADC, shared =[s_type_force,stype],local = [buffer:[f32;4] = [0.;4], ptr:usize = 0], priority=2)]
     fn read_stype(mut cx: read_stype::Context) {
         let [sample] = cx.shared.stype.lock(|s_type| s_type.complete_sample(conv));
+        if *cx.local.ptr < 4 {
+            cx.local.buffer[*cx.local.ptr] = sample;
+            cx.shared.stype.lock(|s_type| s_type.start_sample());
+            return;
+        }
+        // AVERAGE SAMLPES
+         
+        let mut avg_sample: f32 = 0.;
+        //let _ = *cx.local.buffer.iter().map(|val| ;  
+
+        //avg_sample = avg_sample / cx.local.buffer.len();
+         
 
         // Scale in between.
         const GAIN: f32 = 50.;
-        const OFFSET: f32 = 1.700;
+        const OFFSET: f32 = 1.7700;
         const LOADCELL_GAIN: f32 = 0.019984;
         const VOLTAGE_DIV: f32 = 0.68;
         const K: f32 = GAIN * LOADCELL_GAIN * VOLTAGE_DIV;
@@ -342,9 +377,11 @@ mod hlc {
             //*f = (converted + *f ) / 2.0;
             *f = converted;
         });
+        *cx.local.ptr = 0;
         defmt::trace!("Measured {}N", converted);
         //cx.shared.stype.lock(|stype| stype.start_sample());
     }
+
 
     ///Lowest priority task. Expected to be static during operation but needs
     /// to be polled occasionally to keep a consistent value
@@ -380,7 +417,7 @@ mod hlc {
             .s_type_force
             .lock(|input_force| cx.local.hlc_controller.actuate(*input_force))
         {
-            defmt::info!("Actuate: {}", actuate);
+            //defmt::info!("Actuate: {}", actuate);
 
             //defmt::info!("Actuate: {}", actuate);
             let actuate_frame = lib::protocol::MessageType::Write(WriteType::MotorReference {

@@ -8,7 +8,8 @@ heapless = "0.8.0"
 embedded-can = "0.4.1"
 statics = { path = "../statics" }
 arraydeque = { version = "0.5.1", default-features = false }
-can_mcp2515 = { git = "https://github.com/wiiggee1/can_mcp2515", branch = "master"}
+#can_mcp2515 = { git = "https://github.com/wiiggee1/can_mcp2515", branch = "master"}
+can_mcp2515 = { path="/home/wiiggee1/Desktop/can_driver/can_mcp2515/"}
 
 
 [features]

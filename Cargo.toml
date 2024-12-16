@@ -34,7 +34,8 @@ arraydeque = { version = "0.5.1", default-features = false }
 embedded-can = "0.4.1"
 nb = "1.1.0"
 paste = "1.0.15"
-can_mcp2515 = { git = "https://github.com/wiiggee1/can_mcp2515", branch = "master"}
+# can_mcp2515 = { git = "https://github.com/wiiggee1/can_mcp2515", branch = "master"}
+can_mcp2515 = { path="/home/wiiggee1/Desktop/can_driver/can_mcp2515/"}
 
 # cargo build/run
 [profile.dev]
