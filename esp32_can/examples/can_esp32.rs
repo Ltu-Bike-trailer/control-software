@@ -98,16 +98,18 @@ fn main() -> anyhow::Result<(), anyhow::Error>{
 
     //Ok(())
     
-    //let dummy_id = StandardId::new(0x0).unwrap();
-    //let mut frame = CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02,
-    //    0x03]).unwrap();
+    let dummy_id = StandardId::new(0x1).unwrap();
+    let mut frame = CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02,
+        0x03]).unwrap();
     //frame.print_frame();
     //let _ = can_driver.transmit(&frame);
 
 
      loop {
+        
+        let _ = can_driver.transmit(&frame);
         //esp_idf_svc::hal::delay::FreeRtos::delay_ms(1000); // Send message every 1000ms
-
+        /*
         if can_driver.interrupt_pin.is_low() {
             info!("GOT INTERRUPT!!!");
             while !can_driver.interrupt_is_cleared(){
@@ -129,6 +131,9 @@ fn main() -> anyhow::Result<(), anyhow::Error>{
             info!("Got nothing");
             FreeRtos::delay_ms(100);
         }
+        */
+        FreeRtos::delay_ms(500);
+
     }
 
 
