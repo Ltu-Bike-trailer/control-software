@@ -101,23 +101,19 @@ fn main() -> anyhow::Result<(), anyhow::Error>{
     let dummy_id = StandardId::new(0x1).unwrap();
     let mut frame = CanMessage::new(embedded_can::Id::Standard(dummy_id), &[0x01, 0x02,
         0x03]).unwrap();
-    sender.set_left_motor(1.1).unwrap();
-    sender.set_left_motor(2.3).unwrap();
-    let frme = sender.dequeue().unwrap();
-    let frmeee = sender.dequeue().unwrap();
     //frame.print_frame();
     //let _ = can_driver.transmit(&frame);
 
 
      loop {
-        
-        let _ = can_driver.transmit(&frme);
-        let _ = can_driver.transmit(&frmeee);
+            sender.set_left_motor(1.1).unwrap();
+            sender.set_left_motor(2.3).unwrap();
+
+        //let _ = can_driver.transmit(&frme);
 
         //esp_idf_svc::hal::delay::FreeRtos::delay_ms(1000); // Send message every 1000ms
-        /*
+        
         if can_driver.interrupt_pin.is_low() {
-            info!("GOT INTERRUPT!!!");
             while !can_driver.interrupt_is_cleared(){
                 let interrupt_type = can_driver.interrupt_decode().unwrap();
                 info!("type: {:?}", interrupt_type);
@@ -134,10 +130,13 @@ fn main() -> anyhow::Result<(), anyhow::Error>{
             }
             //can_driver.interrupt_pin.enable_interrupt()?;
         } else {
-            info!("Got nothing");
+            info!("Sending Can frame!");
+            let frme = sender.dequeue().unwrap();
+            let _ = can_driver.transmit(&frme);
+
             FreeRtos::delay_ms(100);
         }
-        */
+        
         FreeRtos::delay_ms(500);
 
     }
