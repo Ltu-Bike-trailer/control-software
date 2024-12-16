@@ -298,9 +298,9 @@ mod hlc {
                     */
                 //}
             }
-            if true {
-                panic!(":()");
-            }
+            //if true {
+            //    panic!(":()");
+            //}
         }
 
         cx.local.can_thing.clear_counter();
