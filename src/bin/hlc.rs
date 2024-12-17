@@ -14,7 +14,6 @@ nrf_timer4_monotonic!(Mono, 16_000_000);
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [TIMER0, TIMER1, TIMER2])]
 mod hlc {
 
-
     use can_mcp2515::drivers::{can::*, message::CanMessage};
     use controller::{
         boards::*,
@@ -29,7 +28,17 @@ mod hlc {
     use lib::protocol::{constants::*, sender::Sender, MessageType, WriteType};
     use nrf52840_hal::{
         gpio::{
-            self, p0::P0_04, Disconnected, Floating, Input, Level, Output, Pin, PullDown, PullUp, PushPull
+            self,
+            p0::P0_04,
+            Disconnected,
+            Floating,
+            Input,
+            Level,
+            Output,
+            Pin,
+            PullDown,
+            PullUp,
+            PushPull,
         },
         gpiote::{self, Gpiote},
         pac::{RTC0, SPI0, TIMER2, TIMER3},
@@ -122,11 +131,8 @@ mod hlc {
             OSM,
         );
 
-        
-        let mut can_settings = Mcp2515Settings::default().enable_interrupts(&[
-            CanInte::RX1IE,
-            CanInte::RX0IE,
-        ]);
+        let mut can_settings =
+            Mcp2515Settings::default().enable_interrupts(&[CanInte::RX1IE, CanInte::RX0IE]);
 
         can_settings.filter_b0(DEFAULT_FILTER_MASK, DEFAULT_FILTER_MASK);
         can_settings.filter_b1(DEFAULT_FILTER_MASK, DEFAULT_FILTER_MASK);
@@ -134,15 +140,14 @@ mod hlc {
         defmt::info!("Interrupts: {:#08b}", can_settings.interrupts);
 
         let mut can_driver = Mcp2515Driver::init(spi, cs_pin, can_interrupt, can_settings);
-       
-        
+
         if true {
-        match can_driver.read_caninte() {
-            Ok(val) => defmt::info!("Caninte {:#08b}",val),
-            Err(_)=> panic!("Caninte read failed"),
+            match can_driver.read_caninte() {
+                Ok(val) => defmt::info!("Caninte {:#08b}", val),
+                Err(_) => panic!("Caninte read failed"),
+            }
         }
-        }
-        
+
         gpiote
             .channel0()
             .input_pin(&can_driver.interrupt_pin)
@@ -268,39 +273,29 @@ mod hlc {
             *rx = false;
             new_rx
         }) {
-        
-        
-         //if true {
-         //       panic!("Can RX!")
-         //   }
             defmt::info!("Can RX!");
-            //let mut manager = cx.local.candriver.interrupt_manager();
-            //let mut received_message = None;
-            //while let Some(event) = manager.next() {
-            while !cx.local.candriver.interrupt_is_cleared() {
-                let interrupt_type = cx.local.candriver.interrupt_decode().unwrap();
-                if let Some(frame) = cx.local.candriver.handle_interrupt(interrupt_type) {
-                    //let msg_type = MessageType::try_from(&frame);
-                    defmt::info!("Frame: {}", frame.clone().data);
-                }
-                //defmt::warn!("Got event! {:#04b} Some other cool text", event.event_code as u8);
-                //if let Some(frame) = event.handle() {
-                //    received_message = Some(frame);
-                    //defmt::info!("")
-                    /*
-                    let msg_type = match MessageType::try_from(&frame) {
-                        Ok(msg) =>{
-                            received_message = Some(msg);
-                            break;
-                        },
-                        Err(_) => continue,
-                    };
-                    */
+            let mut manager = cx.local.candriver.interrupt_manager();
+            let mut received_message = None;
+            while let Some(event) = manager.next() {
+                //while !cx.local.candriver.interrupt_is_cleared() {
+                //let interrupt_type = cx.local.candriver.interrupt_decode().unwrap();
+                //if let Some(frame) = cx.local.candriver.handle_interrupt(interrupt_type) {
+                //let msg_type = MessageType::try_from(&frame);
+                // defmt::info!("Frame: {}", frame.clone().data);
                 //}
+                defmt::warn!("Got event! {:#04b} Some other cool text", event.event_code as u8);
+                if let Some(frame) = event.handle() {
+                    received_message = Some(frame);
+                    defmt::info!("Received: data: {:?}, Id: {:016b}", received_message.unwrap().data, received_message.unwrap().id_raw());
+                    
+                    //let msg_type = match WriteType::try_from(&frame) {
+                    //    Ok(msg) => msg,
+                    //    Err(_) => continue,
+                    //};
+                    let msg_type = MessageType::try_from(&frame).unwrap();
+                    defmt::info!("Received MessageType: {}", Debug2Format(&msg_type));
+                }
             }
-            //if true {
-            //    panic!(":()");
-            //}
         }
 
         cx.local.can_thing.clear_counter();
@@ -353,12 +348,11 @@ mod hlc {
             return;
         }
         // AVERAGE SAMLPES
-         
+
         let mut avg_sample: f32 = 0.;
-        //let _ = *cx.local.buffer.iter().map(|val| ;  
+        //let _ = *cx.local.buffer.iter().map(|val| ;
 
         //avg_sample = avg_sample / cx.local.buffer.len();
-         
 
         // Scale in between.
         const GAIN: f32 = 50.;
@@ -381,7 +375,6 @@ mod hlc {
         defmt::trace!("Measured {}N", converted);
         //cx.shared.stype.lock(|stype| stype.start_sample());
     }
-
 
     ///Lowest priority task. Expected to be static during operation but needs
     /// to be polled occasionally to keep a consistent value
