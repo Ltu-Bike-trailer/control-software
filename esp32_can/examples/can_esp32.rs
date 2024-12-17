@@ -106,8 +106,10 @@ fn main() -> anyhow::Result<(), anyhow::Error>{
 
 
      loop {
-            sender.set_left_motor(1.1).unwrap();
-            sender.set_left_motor(2.3).unwrap();
+            sender.set_left_motor(1.0).unwrap();
+            sender.set_left_motor(2.0).unwrap();
+            sender.set_right_motor(3.0).unwrap();
+            sender.set_right_motor(4.0).unwrap();
 
         //let _ = can_driver.transmit(&frme);
 
@@ -134,10 +136,10 @@ fn main() -> anyhow::Result<(), anyhow::Error>{
             let frme = sender.dequeue().unwrap();
             let _ = can_driver.transmit(&frme);
 
-            FreeRtos::delay_ms(100);
+            //FreeRtos::delay_ms(100);
         }
         
-        FreeRtos::delay_ms(500);
+        FreeRtos::delay_ms(200);
 
     }
 
