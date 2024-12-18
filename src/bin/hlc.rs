@@ -14,6 +14,8 @@ nrf_timer4_monotonic!(Mono, 16_000_000);
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [TIMER0, TIMER1, TIMER2])]
 mod hlc {
 
+    use core::borrow::Borrow;
+
     use can_mcp2515::drivers::{can::*, message::CanMessage};
     use controller::{
         boards::*,
@@ -111,7 +113,8 @@ mod hlc {
         let cs_pin = port1.p1_08.into_push_pull_output(Level::High).degrade();
         let can_interrupt = port0.p0_28.into_pullup_input().degrade();
 
-        let mut spi = Spi::new(device.SPI0, pins, Frequency::M2, MODE_0);
+        // M1 seems to be the upper cap for the frequency. 
+        let mut spi = Spi::new(device.SPI0, pins, Frequency::K500, MODE_0);
         let mut gpiote = Gpiote::new(device.GPIOTE);
 
         const CLKEN: bool = true;
@@ -131,6 +134,13 @@ mod hlc {
             OSM,
         );
 
+        //CanInte::MERRE,
+        //    CanInte::ERRIE,
+        //    CanInte::TX2IE,
+        //    CanInte::TX1IE,
+        //    CanInte::TX0IE,
+        //    CanInte::RX1IE,
+        //    CanInte::RX0IE,
         let mut can_settings =
             Mcp2515Settings::default().enable_interrupts(&[CanInte::RX1IE, CanInte::RX0IE]);
 
@@ -248,14 +258,14 @@ mod hlc {
                 defmt::info!("GPIOTE interrupt occurred [channel 0] - Can Master!");
                 cx.shared.can_rx.lock(|rx| *rx = true);
                 let _ = cx.local.can_sender.try_send(None);
-                gpiote.channel0().reset_events();
-
+                
+                cortex_m::peripheral::NVIC::mask(nrf52840_hal::pac::interrupt::GPIOTE);
                 defmt::println!("\n");
             }
         });
     }
 
-    #[task(binds = RTC0, priority = 3, local = [candriver, can_receiver, can_thing], shared = [sender, can_rx])]
+    #[task(binds = RTC0, priority = 3, local = [candriver, can_receiver, can_thing], shared = [sender, can_rx,gpiote])]
     fn handle_can(mut cx: handle_can::Context) {
         //defmt::warn!("Can frames???");
         cx.local.can_thing.clear_counter();
@@ -265,7 +275,7 @@ mod hlc {
 
         if let Some(msg) = msg {
             //defmt::warn!("SENDING CAN FRAME???");
-            //cx.local.candriver.transmit(&msg);
+            cx.local.candriver.transmit(&msg);
         }
 
         if cx.shared.can_rx.lock(|rx| {
@@ -273,31 +283,40 @@ mod hlc {
             *rx = false;
             new_rx
         }) {
-            defmt::info!("Can RX!");
+            //defmt::info!("Can RX!");
             let mut manager = cx.local.candriver.interrupt_manager();
             let mut received_message = None;
+            let mut counter = 0;
             while let Some(event) = manager.next() {
-                //while !cx.local.candriver.interrupt_is_cleared() {
-                //let interrupt_type = cx.local.candriver.interrupt_decode().unwrap();
-                //if let Some(frame) = cx.local.candriver.handle_interrupt(interrupt_type) {
-                //let msg_type = MessageType::try_from(&frame);
-                // defmt::info!("Frame: {}", frame.clone().data);
-                //}
-                defmt::warn!("Got event! {:#04b} Some other cool text", event.event_code as u8);
+                counter += 1;
+                //defmt::info!("GPIOTE: LOOPTILOOP{}",counter);
+                //defmt::warn!("Got event! {:#04b} Some other cool text", event.event_code as u8);
                 if let Some(frame) = event.handle() {
                     received_message = Some(frame);
-                    defmt::info!("Received: data: {:?}, Id: {:016b}", received_message.unwrap().data, received_message.unwrap().id_raw());
+                    let msg = match WriteType::try_from(&frame) {
+                        Ok(msg) => msg,
+                        Err(_) => continue,
+                    };
                     
-                    //let msg_type = match WriteType::try_from(&frame) {
-                    //    Ok(msg) => msg,
-                    //    Err(_) => continue,
-                    //};
-                    let msg_type = MessageType::try_from(&frame).unwrap();
-                    defmt::info!("Received MessageType: {}", Debug2Format(&msg_type));
                 }
+                if let Some(mut frame) = received_message {
+                    let id = frame.id_raw();
+            defmt::info!("GPIOTE: Received: data: {:?}, Id: {:016b}", frame.data, id);
+            
+                }//let msg_type = MessageType::try_from(&received_message.unwrap()).unwrap();
+            //defmt::info!("MessageType: {:?}", Debug2Format(&msg_type)); 
+            //
             }
-        }
+            cx.shared.gpiote.lock(|gpiote| {
+                gpiote.channel0().clear();
+                gpiote.channel0().reset_events();
+                unsafe { cortex_m::peripheral::NVIC::unmask(nrf52840_hal::pac::interrupt::GPIOTE) };
 
+            })
+
+
+        }
+        
         cx.local.can_thing.clear_counter();
 
         //defmt::info!("hello");
@@ -410,7 +429,7 @@ mod hlc {
             .s_type_force
             .lock(|input_force| cx.local.hlc_controller.actuate(*input_force))
         {
-            //defmt::info!("Actuate: {}", actuate);
+            defmt::info!("Actuate: {}", actuate);
 
             //defmt::info!("Actuate: {}", actuate);
             let actuate_frame = lib::protocol::MessageType::Write(WriteType::MotorReference {

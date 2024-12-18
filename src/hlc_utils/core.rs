@@ -107,7 +107,7 @@ impl Controller {
             // Do nothing wait for all data to be present.
             None
         } else {
-            Some(actuate)
+            Some(actuate.clamp(-0.5, 0.5))
         }
     }
 
