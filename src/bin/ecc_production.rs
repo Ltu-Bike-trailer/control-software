@@ -68,7 +68,7 @@ mod etc {
         angle_acc: f32,
         target: (f32, Instant<u64, 1, 16_000_000>),
         current_sense: esc::CurrentManager,
-        measuring:bool,
+        measuring: bool,
     }
 
     #[local]
@@ -116,20 +116,21 @@ mod etc {
         defmt::trace!("Init: SPI");
         let (pins, (spi, int_pin, cs)) = pins.configure_spi();
         defmt::trace!("Init: CAN driver");
-        let can = can_mcp2515::drivers::can::Mcp2515Driver::init(
+        let mut can = can_mcp2515::drivers::can::Mcp2515Driver::init(
             spi,
             cs,
             int_pin,
             // Only accept messages for the left motor.
             can_mcp2515::drivers::can::Mcp2515Settings::default() // All bits have to match a left motor message.
-                .filter_b0(
-                    0x7FF,
-                    0x7FF,
-                )
+                .filter_b0(0, 0)
                 // All bits have to match 0x0
-                .filter_b1(0x7FF, 0)
+                .filter_b1(0, 0)
                 .enable_interrupts(&[CanInte::RX0IE, CanInte::RX1IE]),
         );
+        match can.read_caninte() {
+            Ok(val) => defmt::info!("Read caninte : {:#08b}", val),
+            Err(_) => {}
+        }
         defmt::trace!("Init: Event manager");
         let events = pins.complete();
 
@@ -200,7 +201,7 @@ mod etc {
                 angle_acc: 0.,
                 target: (0.3, Instant::<u64, 1, 16_000_000>::from_ticks(0)),
                 current_sense,
-                measuring:false,
+                measuring: false,
             },
             Local {
                 // Initialization of local resources go here
@@ -212,7 +213,8 @@ mod etc {
                 drive_pattern,
                 control_loop_timer,
                 buffer: RingBuffer::new([
-                    0.5, -0.0001, 0.6,-0.0001, 0.7, 0.8, 0.9, 1., 1.5, 2.5, -2., 1.5, 0.2, 0.3, 0.4,
+                    0.5, -0.0001, 0.6, -0.0001, 0.7, 0.8, 0.9, 1., 1.5, 2.5, -2., 1.5, 0.2, 0.3,
+                    0.4,
                 ]),
                 can,
                 can_event_receiver,
@@ -351,6 +353,7 @@ mod etc {
     )]
     /// Manages CAN messages.
     fn can(mut cx: can::Context) {
+        defmt::warn!("TICK");
         cx.local.can_timer.reset_event(RtcInterrupt::Compare0);
         while let Ok(recv) = cx.local.can_event_receiver.try_recv() {
             if let Some(message) = recv {
@@ -386,6 +389,7 @@ mod etc {
                     cx.shared.target.lock(|duty| *duty = (target, deadline));
                 }
             }
+            defmt::warn!("Responding with can frame :)");
             if let Some(msg) = cx.local.queue.dequeue() {
                 defmt::warn!("Responding with can frame :)");
                 // It is totally fine if this fails here.
@@ -397,6 +401,17 @@ mod etc {
                 // to shere size of the buffer.
                 *cx.local.queue = unsafe { controller::util::DATA.get_n_latest::<2>() };
             }
+        }
+        if let Some(msg) = cx.local.queue.dequeue() {
+            defmt::warn!("Sending can frame :)");
+            // It is totally fine if this fails here.
+            let _ = cx.local.can.transmit(&msg);
+            cx.local.queue.set_theta(1.0).unwrap();
+        } else {
+            // Grabs the 10 latest control messages from the buffer. This is safe since
+            // we will never collide with an ongoing write due
+            // to shere size of the buffer.
+            *cx.local.queue = unsafe { controller::util::DATA.get_n_latest::<2>() };
         }
         cx.local.can_timer.clear_counter();
     }
@@ -516,8 +531,8 @@ mod etc {
                 start.duration_since_epoch().to_micros(),
                 target,
             );
-            
-            defmt::info!("Actuation {}",actuation);
+
+            defmt::info!("Actuation {}", actuation);
             unsafe { controller::util::DATA.write(element) };
         }
     }
@@ -527,7 +542,7 @@ mod etc {
     /// This ensures that we start sampling on start of the pwm signal.
     #[task(binds = PWM0, shared=[current_sense,measuring], priority = 3)]
     fn start_sample(mut cx: start_sample::Context) {
-        let pwm = unsafe {(0x0 as *mut Pwm<PWM0>).read()};
+        let pwm = unsafe { (0x0 as *mut Pwm<PWM0>).read() };
         pwm.disable_interrupt(pwm::PwmEvent::PwmPeriodEnd);
         cx.shared.current_sense.lock(|sense| {
             sense.start_sample();
@@ -548,12 +563,12 @@ mod etc {
             .shared
             .current_sense
             .lock(|sense| sense.complete_sample());
-        let pwm = unsafe {(0x0 as *mut Pwm<PWM0>).read()};
+        let pwm = unsafe { (0x0 as *mut Pwm<PWM0>).read() };
         pwm.enable_interrupt(pwm::PwmEvent::PwmPeriodEnd);
         sample[3] -= 0.09;
 
         cx.shared.current.lock(|current| {
-            *current = (sample[3] + *current)/2.0;
+            *current = (sample[3] + *current) / 2.0;
         });
         cx.shared.measuring.lock(|measuring| *measuring = false);
         *cx.local.counter += 1;
