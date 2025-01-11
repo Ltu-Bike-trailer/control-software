@@ -138,8 +138,8 @@ mod hlc {
         let mut can_settings =
             Mcp2515Settings::default().enable_interrupts(&[CanInte::RX1IE, CanInte::RX0IE]);
 
-        can_settings.filter_b0(DEFAULT_FILTER_MASK, DEFAULT_FILTER_MASK);
-        can_settings.filter_b1(DEFAULT_FILTER_MASK, DEFAULT_FILTER_MASK);
+        //can_settings.filter_b0(DEFAULT_FILTER_MASK, DEFAULT_FILTER_MASK);
+        //can_settings.filter_b1(DEFAULT_FILTER_MASK, DEFAULT_FILTER_MASK);
 
         defmt::info!("Interrupts: {:#08b}", can_settings.interrupts);
 
