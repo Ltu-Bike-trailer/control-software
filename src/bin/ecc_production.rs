@@ -68,6 +68,7 @@ mod etc {
         angle_acc: f32,
         target: (f32, Instant<u64, 1, 16_000_000>),
         current_sense: esc::CurrentManager,
+        measuring:bool,
     }
 
     #[local]
@@ -123,7 +124,7 @@ mod etc {
             can_mcp2515::drivers::can::Mcp2515Settings::default() // All bits have to match a left motor message.
                 .filter_b0(
                     0x7FF,
-                    lib::protocol::constants::Message::SetMotorReference as u16,
+                    0x7FF,
                 )
                 // All bits have to match 0x0
                 .filter_b1(0x7FF, 0)
@@ -187,7 +188,7 @@ mod etc {
             .set_compare(RtcCompareReg::Compare0, 32768)
             .unwrap(); //655);
         can_timer.enable_counter();
-        let _ = mono_sweep::spawn();
+        //let _ = mono_sweep::spawn();
         defmt::debug!("INIT: Done");
         (
             Shared {
@@ -199,6 +200,7 @@ mod etc {
                 angle_acc: 0.,
                 target: (0.3, Instant::<u64, 1, 16_000_000>::from_ticks(0)),
                 current_sense,
+                measuring:false,
             },
             Local {
                 // Initialization of local resources go here
@@ -210,7 +212,7 @@ mod etc {
                 drive_pattern,
                 control_loop_timer,
                 buffer: RingBuffer::new([
-                    0.5, 0.6, 0.7, 0.8, 0.9, 1., 1.5, 2.5, -0.1, -0.2, -2., 1.5, 0.2, 0.3, 0.4,
+                    0.5, -0.0001, 0.6,-0.0001, 0.7, 0.8, 0.9, 1., 1.5, 2.5, -2., 1.5, 0.2, 0.3, 0.4,
                 ]),
                 can,
                 can_event_receiver,
@@ -308,6 +310,7 @@ mod etc {
                     cx.local.drive_pattern.clear_c();
                 }
                 GpioEvents::CAN => {
+                    defmt::warn!("Got CAN message");
                     if cx.local.can_event_sender.try_send(None).is_err() {
                         defmt::error!("It is a sad day for all of can kind");
                     }
@@ -450,13 +453,14 @@ mod etc {
         const FACTOR: f32 = core::f32::consts::TAU / 86.;
         let angular_velocity = FACTOR / delta_time;
 
+        /*
         if angular_velocity <= 1. || angular_velocity == f32::INFINITY {
             let time_to_sleep = (start + DURATION) - Mono::now();
 
             // Wait until the next control loop iteration.
             control_loop_timer.timeout(time_to_sleep);
             return;
-        }
+        }*/
 
         if Mono::now() > deadline {
             target = 0.;
@@ -504,7 +508,7 @@ mod etc {
         *cx.local.previous_avel = angular_velocity;
         let angular_acceleration = (angular_velocity - prev) / delta_time;
 
-        if *cx.local.loop_counter % 3 == 0 {
+        if *cx.local.loop_counter % 100 == 0 {
             let element = controller::util::ControlLog::new(
                 current,
                 angular_velocity,
@@ -512,6 +516,8 @@ mod etc {
                 start.duration_since_epoch().to_micros(),
                 target,
             );
+            
+            defmt::info!("Actuation {}",actuation);
             unsafe { controller::util::DATA.write(element) };
         }
     }
@@ -519,36 +525,40 @@ mod etc {
     /// Starts an adc sample.
     ///
     /// This ensures that we start sampling on start of the pwm signal.
-    #[task(binds = PWM0, shared=[current_sense], priority = 3)]
+    #[task(binds = PWM0, shared=[current_sense,measuring], priority = 3)]
     fn start_sample(mut cx: start_sample::Context) {
+        let pwm = unsafe {(0x0 as *mut Pwm<PWM0>).read()};
+        pwm.disable_interrupt(pwm::PwmEvent::PwmPeriodEnd);
         cx.shared.current_sense.lock(|sense| {
             sense.start_sample();
         });
 
         // Disable interrupts until next time.
-        nrf52840_hal::pac::NVIC::mask(nrf52840_hal::pac::interrupt::PWM0);
+        //nrf52840_hal::pac::NVIC::mask(nrf52840_hal::pac::interrupt::PWM0);
     }
 
     /// Samples all of the phases current on the rising edge of the pwm signal.
     ///
     /// This samples all of the currents but returns only the global system
     /// current as this is a smoother signal.
-    #[task(binds = SAADC, shared = [current,current_sense], local = [counter:u32 = 0], priority=3)]
+    #[task(binds = SAADC, shared = [current,current_sense,measuring], local = [counter:u32 = 0], priority=4)]
     /// Continuously samples the current.
     fn current_sense(mut cx: current_sense::Context) {
-        let sample = cx
+        let mut sample = cx
             .shared
             .current_sense
             .lock(|sense| sense.complete_sample());
+        let pwm = unsafe {(0x0 as *mut Pwm<PWM0>).read()};
+        pwm.enable_interrupt(pwm::PwmEvent::PwmPeriodEnd);
+        sample[3] -= 0.09;
 
         cx.shared.current.lock(|current| {
-            *current = sample[3];
+            *current = (sample[3] + *current)/2.0;
         });
+        cx.shared.measuring.lock(|measuring| *measuring = false);
         *cx.local.counter += 1;
-
         if *cx.local.counter > 100 {
-            defmt::info!("Current: {}", sample[3]);
-
+            //defmt::info!("Current: {}", sample[3]);
             *cx.local.counter = 0;
         }
     }

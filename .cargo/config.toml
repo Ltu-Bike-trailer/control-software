@@ -26,5 +26,5 @@ bbr = "build --release --bin"
 
 
 [env]
-#DEFMT_LOG = "error"
+#DEFMT_LOG = "warn"
 DEFMT_LOG = "trace"

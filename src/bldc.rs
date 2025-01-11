@@ -29,7 +29,8 @@ pub struct DrivePattern {
 
 /// Drives the motor clock wise.
 const CW_PATTERN: [u8; 8] = [
-    0b00_00_00, 0b10_00_01, // 0b001
+    0b00_00_00, 
+    0b10_00_01, // 0b001
     0b00_01_10, // 0b010
     0b10_01_00, // 0b011
     0b01_10_00, // 0b100
@@ -40,13 +41,14 @@ const CW_PATTERN: [u8; 8] = [
 
 /// Drives the motor counter clock wise.
 const CCW_PATTERN: [u8; 8] = [
-    0b00_00_00, 0b00_10_01, // 0b001
-    0b10_01_00, // 0b010
-    0b10_00_01, // 0b011
-    0b01_00_10, // 0b100
-    0b01_10_00, // 0b101
-    0b00_01_10, // 0b110
-    0b00_01_10, // If out of bounds for some reason, final state.
+    0b00_00_00, 
+    0b01_00_10, // 0b001
+    0b00_10_01, // 0b010
+    0b01_10_00, // 0b011
+    0b10_01_00, // 0b100
+    0b00_01_10, // 0b101
+    0b10_00_01, // 0b110
+    0b10_00_01, // If out of bounds for some reason, final state.
 ];
 
 impl DrivePattern {
@@ -154,7 +156,7 @@ pub struct Pattern(u8, u8);
 
 impl PartialEq for Pattern {
     fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
+        self.1 == other.1
     }
 }
 
@@ -164,7 +166,7 @@ impl Pattern {
     /// A simple named tuple that allows the user to change directions.
     pub fn get(self, duty: f32) -> ((bool, bool), (bool, bool), (bool, bool)) {
         if duty >= 0. {
-            return Self::conv(self.0);
+            return Self::conv(self.1);
         }
         // Drive the low side mosfets if we want to break.
         ((false, true), (false, true), (false, true))
@@ -175,7 +177,7 @@ impl Pattern {
     #[must_use]
     pub fn get_u8(self, duty: f32) -> u8 {
         if duty >= 0. {
-            return self.0;
+            return self.1;
         }
         0b01_01_01
     }

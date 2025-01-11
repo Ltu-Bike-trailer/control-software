@@ -129,7 +129,7 @@ SECTIONS
     __sdata = .;
     *(.data .data.*);
     . = ALIGN(4); /* 4-byte align the end (VMA) of this section */
-  } > RAM2 AT>FLASH
+  } > FLASH AT>FLASH
   /* Allow sections from user `memory.x` injected using `INSERT AFTER .data` to
    * use the .data loading mechanism by pushing __edata. Note: do not change
    * output region or load region in those user sections! */
