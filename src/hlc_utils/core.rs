@@ -99,7 +99,7 @@ impl Controller {
         let actuate = Self::A.0 * tk.0 - Self::A.1 * tk.1 + Self::A.2 * tk.2 + Self::B.0 * ek.0
             - Self::B.1 * ek.1
             + Self::B.2 * ek.2;
-
+        defmt::info!("Actuate raw: {}", actuate);
         self.write_moment(actuate);
         self.write_err(error);
 
@@ -107,7 +107,9 @@ impl Controller {
             // Do nothing wait for all data to be present.
             None
         } else {
-            Some(actuate.clamp(-0.5, 0.5))
+            Some(actuate.clamp(-2.0, 2.0))
+            //Some(actuate)
+
         }
     }
 
@@ -127,6 +129,7 @@ impl Controller {
     #[inline(always)]
     fn write_err(&mut self, err: f32) {
         let err = err.clamp(-100., 100.);
+
         self.e_prior += 1;
         if self.e_prior >= 3 {
             self.e_prior = 0;
@@ -136,7 +139,7 @@ impl Controller {
 
     #[inline(always)]
     fn write_moment(&mut self, torque: f32) {
-        let moment = torque.clamp(-2.0, 2.0);
+        let moment = torque.clamp(-0.1, 0.1);
         self.t_prior += 1;
         if self.t_prior >= 3 {
             self.t_prior = 0;

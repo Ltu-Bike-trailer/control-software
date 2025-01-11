@@ -21,6 +21,7 @@ mod hlc {
         boards::*,
         drivers::hx711::{Driver, Gain, ValidTimings},
         hlc_utils::{config::*, core::*, events::*, stype_calibration::*},
+        RingBuffer,
     };
     use cortex_m::asm;
     use defmt::{panic, Debug2Format};
@@ -345,23 +346,14 @@ mod hlc {
     //}
 
     ///High priority constant polling of S-Type loadcell
-    #[task(binds = SAADC, shared =[s_type_force,stype],local = [buffer:[f32; 4] = [0.;4], ptr:usize = 0], priority=2)]
+    #[task(binds = SAADC, shared =[s_type_force,stype],local = [buffer:RingBuffer<f32,50> = RingBuffer::new([0.;50]), static_reject:[f32;128] = [0.;128],reject_ptr:usize = 0, noise_reject_counter:usize = 0, noise_floor:f32 = 0., ptr:usize = 0], priority=2)]
     fn read_stype(mut cx: read_stype::Context) {
         let [sample] = cx.shared.stype.lock(|s_type| s_type.complete_sample(conv));
-        if *cx.local.ptr < 4 {
-            cx.local.buffer[*cx.local.ptr] = sample;
-            cx.shared.stype.lock(|s_type| s_type.start_sample());
-            //*cx.local.ptr += 1; 
-            return;
+        
+        if *cx.local.reject_ptr < 100 {
+            *cx.local.reject_ptr += 1;
+            return
         }
-         
-        // AVERAGE SAMLPES
-
-        let mut avg_sample: f32 = 0.;
-        //let _ = *cx.local.buffer.iter().map(|val| ;
-
-        //avg_sample = avg_sample / cx.local.buffer.len();
-
         // Scale in between.
         const GAIN: f32 = 50.;
         const OFFSET: f32 = 1.7700;
@@ -370,17 +362,43 @@ mod hlc {
         const K: f32 = GAIN * LOADCELL_GAIN * VOLTAGE_DIV;
         const K_NEWTON: f32 = K / (200.0 * 9.82);
         const FORCE_INV: f32 = (1.0 / K_NEWTON);
-        let converted: f32 = FORCE_INV * sample - (OFFSET / K_NEWTON);
+        if *cx.local.noise_reject_counter < 120 {
+            cx.local.static_reject[*cx.local.noise_reject_counter] = sample;
+            *cx.local.noise_reject_counter += 1;
+            return;
+        }
+        else if *cx.local.noise_reject_counter == 120 {
+
+
+            *cx.local.noise_floor = cx.local.static_reject.iter().sum::<f32>() / 120.;//.map(|num|FORCE_INV * *num- (OFFSET / K_NEWTON)).sum::<f32>() / 120.;
+            defmt::warn!("Noise floor {}",cx.local.noise_floor);
+            
+            *cx.local.noise_floor = FORCE_INV * *cx.local.noise_floor - (OFFSET / K_NEWTON);
+            *cx.local.noise_reject_counter += 1;
+            return;
+        }
+        defmt::warn!("SAADC :)");
+        cx.local.buffer.assign_next(sample);
+        cx.shared.stype.lock(|s_type| s_type.start_sample());
+
+         
+        // AVERAGE SAMLPES
+
+        let sample = cx.local.buffer.avg();
+
+        let converted: f32 = FORCE_INV * sample - (OFFSET / K_NEWTON) - *cx.local.noise_floor;
         let mut converted_avg: f32 = 0.0;
         //let converted = GAIN * sample;
 
         cx.shared.s_type_force.lock(|f| {
             //converted_avg = (converted + *f) / 2.0 ;
             //*f = (converted + *f ) / 2.0;
+            defmt::info!("Stype force: {}", f);
             *f = converted;
         });
         *cx.local.ptr = 0;
         defmt::trace!("Measured {}N", converted);
+        defmt::trace!("Measured noise floor {}N", cx.local.noise_floor);
         //cx.shared.stype.lock(|stype| stype.start_sample());
     }
 
@@ -418,7 +436,7 @@ mod hlc {
             .s_type_force
             .lock(|input_force| cx.local.hlc_controller.actuate(*input_force))
         {
-            //defmt::info!("Actuate: {}", actuate);
+            defmt::info!("Actuate: {}", actuate);
 
             //defmt::info!("Actuate: {}", actuate);
             let actuate_frame = lib::protocol::MessageType::Write(WriteType::MotorReference {
@@ -435,11 +453,6 @@ mod hlc {
             defmt::warn!(":/");
         }
 
-        //cx.shared.stype.lock(|stype| stype.start_sample());
-        //Mono::delay_until(time + 20u64.millis()).await;
-        //defmt::info!("Adc sample!");
-        //Mono::delay(20u64.millis()).await;
-        //Mono::delay_ms(&mut Mono, 20);
         cx.local
             .control_timer
             .timeout((time + 20u64.millis()) - Mono::now());
