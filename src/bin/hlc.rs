@@ -134,13 +134,6 @@ mod hlc {
             OSM,
         );
 
-        //CanInte::MERRE,
-        //    CanInte::ERRIE,
-        //    CanInte::TX2IE,
-        //    CanInte::TX1IE,
-        //    CanInte::TX0IE,
-        //    CanInte::RX1IE,
-        //    CanInte::RX0IE,
         let mut can_settings =
             Mcp2515Settings::default().enable_interrupts(&[CanInte::RX1IE, CanInte::RX0IE]);
 
@@ -185,9 +178,6 @@ mod hlc {
         cfg.gain = adc_gain();
         cfg.oversample = saadc::Oversample::OVER256X;
         cfg.reference = saadc::Reference::INTERNAL;
-
-        // The input pin.
-        //let input = port0.p0_04;
 
         //This is probably wrong is some way taken directly from S-type calibration
         // and modified
@@ -267,14 +257,13 @@ mod hlc {
 
     #[task(binds = RTC0, priority = 3, local = [candriver, can_receiver, can_thing], shared = [sender, can_rx,gpiote])]
     fn handle_can(mut cx: handle_can::Context) {
-        //defmt::warn!("Can frames???");
         cx.local.can_thing.clear_counter();
         cx.local.can_thing.reset_event(RtcInterrupt::Compare0);
 
         let msg = cx.shared.sender.lock(|sender| sender.dequeue());
 
         if let Some(msg) = msg {
-            //defmt::warn!("SENDING CAN FRAME???");
+            defmt::warn!("SENDING CAN FRAME???");
             cx.local.candriver.transmit(&msg);
         }
 
@@ -289,8 +278,6 @@ mod hlc {
             let mut counter = 0;
             while let Some(event) = manager.next() {
                 counter += 1;
-                //defmt::info!("GPIOTE: LOOPTILOOP{}",counter);
-                //defmt::warn!("Got event! {:#04b} Some other cool text", event.event_code as u8);
                 if let Some(frame) = event.handle() {
                     received_message = Some(frame);
                     let msg = match WriteType::try_from(&frame) {
@@ -358,14 +345,16 @@ mod hlc {
     //}
 
     ///High priority constant polling of S-Type loadcell
-    #[task(binds = SAADC, shared =[s_type_force,stype],local = [buffer:[f32;4] = [0.;4], ptr:usize = 0], priority=2)]
+    #[task(binds = SAADC, shared =[s_type_force,stype],local = [buffer:[f32; 4] = [0.;4], ptr:usize = 0], priority=2)]
     fn read_stype(mut cx: read_stype::Context) {
         let [sample] = cx.shared.stype.lock(|s_type| s_type.complete_sample(conv));
         if *cx.local.ptr < 4 {
             cx.local.buffer[*cx.local.ptr] = sample;
             cx.shared.stype.lock(|s_type| s_type.start_sample());
+            //*cx.local.ptr += 1; 
             return;
         }
+         
         // AVERAGE SAMLPES
 
         let mut avg_sample: f32 = 0.;
@@ -429,7 +418,7 @@ mod hlc {
             .s_type_force
             .lock(|input_force| cx.local.hlc_controller.actuate(*input_force))
         {
-            defmt::info!("Actuate: {}", actuate);
+            //defmt::info!("Actuate: {}", actuate);
 
             //defmt::info!("Actuate: {}", actuate);
             let actuate_frame = lib::protocol::MessageType::Write(WriteType::MotorReference {
