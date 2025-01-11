@@ -16,10 +16,10 @@ pub mod constants {
     pub const PWM_MAX: i32 = 32767;
 
     /// The Proportional gain for the motor.
-    pub const KP: f32 = 200.;
+    pub const KP: f32 = 25.;
 
     /// The Integral gain for the motor.
-    pub const KI: f32 = 300.;
+    pub const KI: f32 = 100.;
 
     /// The derivative gain for the motor.
     pub const KD: f32 = 0.1; //-0.5;

@@ -217,6 +217,20 @@ impl TryFrom<&CanMessage> for WriteType {
                 LeftMotor | RightMotor => Self::Motor(MotorSubSystem::try_from(value)?),
                 SensorAlpha | SensorTheta | SensorLBed | SensorLFront | SensorCurrentLeft
                 | SensorCurrentRight => Self::Sensor(SensorSubSystem::try_from(value)?),
+                SetMotorReference => Self::MotorReference {
+                    target: f32::from_le_bytes([
+                        value.data[0],
+                        value.data[1],
+                        value.data[2],
+                        value.data[3],
+                    ]),
+                    deadline: u32::from_le_bytes([
+                        value.data[4],
+                        value.data[5],
+                        value.data[6],
+                        value.data[7],
+                    ]),
+                },
                 _ => return Err(ParsingError::IncorrectId),
             },
             Id::Extended(_) => return Err(ParsingError::IncorrectId),

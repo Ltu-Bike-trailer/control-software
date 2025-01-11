@@ -19,7 +19,7 @@ fn main() {
     // here, we ensure the build script is only re-run when
     // `memory.x` is changed.
     println!("cargo:rerun-if-changed=memory.x");
-    println!("cargo:rerun-if-changed=custom_link.x");
+    //println!("cargo:rerun-if-changed=custom_link.x");
     println!("cargo:rerun-if-changed=./.cargo/config.toml");
 
     println!("cargo:rustc-link-arg-bins=--nmagic");

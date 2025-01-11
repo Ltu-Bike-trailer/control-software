@@ -36,16 +36,19 @@ mod etc {
         },
         RingBuffer,
     };
+    use defmt::Debug2Format;
     use embedded_can::blocking::Can;
     use esc::{self, events::GpioEvents, PinConfig};
     use lib::protocol::{MessageType, WriteType};
     use nrf52840_hal::{
         gpio::{p1::P1_08, Input, Output, Pin, PullUp, PushPull},
-        pac::{PWM0, PWM1, PWM2, SPI0, TIMER3},
+        pac::{PWM0, PWM1, PWM2, RTC0, SPI0, TIMER3},
         pwm::{self, Pwm},
+        rtc::{RtcCompareReg, RtcInterrupt},
         spi::Spi,
         time::U32Ext,
         timer::OneShot,
+        Rtc,
     };
     //use paste::paste;
     use rtic_monotonics::{
@@ -80,6 +83,7 @@ mod etc {
         can: Mcp2515Driver<Spi<SPI0>, P1_08<Output<PushPull>>, Pin<Input<PullUp>>>,
         can_event_sender: rtic_sync::channel::Sender<'static, Option<CanMessage>, 10>,
         can_event_receiver: rtic_sync::channel::Receiver<'static, Option<CanMessage>, 10>,
+        can_timer: Rtc<RTC0>,
     }
 
     #[init]
@@ -123,12 +127,7 @@ mod etc {
                 )
                 // All bits have to match 0x0
                 .filter_b1(0x7FF, 0)
-                .enable_interrupts(&[
-                    CanInte::RX0IE,
-                    CanInte::TX0IE,
-                    CanInte::TX1IE,
-                    CanInte::TX2IE,
-                ]),
+                .enable_interrupts(&[CanInte::RX0IE, CanInte::RX1IE]),
         );
         defmt::trace!("Init: Event manager");
         let events = pins.complete();
@@ -180,6 +179,16 @@ mod etc {
 
         let (can_event_sender, can_event_receiver) =
             rtic_sync::make_channel!(Option<CanMessage>, 10);
+
+        let mut can_timer = nrf52840_hal::rtc::Rtc::new(cx.device.RTC0, 1).unwrap();
+        can_timer.enable_event(RtcInterrupt::Compare0);
+        can_timer.enable_interrupt(RtcInterrupt::Compare0, None);
+        can_timer
+            .set_compare(RtcCompareReg::Compare0, 32768)
+            .unwrap(); //655);
+        can_timer.enable_counter();
+        let _ = mono_sweep::spawn();
+        defmt::debug!("INIT: Done");
         (
             Shared {
                 // ~.1 = MAX speed, ~.7 zero speed
@@ -206,8 +215,23 @@ mod etc {
                 can,
                 can_event_receiver,
                 can_event_sender,
+                can_timer,
             },
         )
+    }
+
+    #[task(shared = [target],local=[buffer], priority = 3)]
+    /// NOTE: Left for completeness and testing purposes. This can be
+    /// substituted for the control system to apply a specific duty cycle
+    /// for a specific amount of time.
+    async fn mono_sweep(mut cx: mono_sweep::Context) {
+        for new_duty in cx.local.buffer {
+            cx.shared.target.lock(|duty| {
+                *duty = (new_duty, Mono::now() + 11u32.secs());
+                defmt::info!("Using {} duty cycle", new_duty);
+            });
+            Mono::delay(10u32.secs().into()).await;
+        }
     }
 
     #[task(
@@ -284,7 +308,9 @@ mod etc {
                     cx.local.drive_pattern.clear_c();
                 }
                 GpioEvents::CAN => {
-                    let _ = cx.local.can_event_sender.try_send(None);
+                    if cx.local.can_event_sender.try_send(None).is_err() {
+                        defmt::error!("It is a sad day for all of can kind");
+                    }
                 }
             }
         }
@@ -307,43 +333,69 @@ mod etc {
         }
     }
 
-    #[task(local = [can,can_event_receiver], shared = [target], priority = 3)]
+    #[task(binds = RTC0,
+        local = [
+            can,
+            can_event_receiver,
+            can_timer,
+            queue:lib::protocol::sender::Sender<2> = lib::protocol::sender::Sender::new(),
+            counter:u64 = 0,
+        ],
+        shared = [
+            target
+        ],
+        priority = 3
+    )]
     /// Manages CAN messages.
-    async fn can(mut cx: can::Context) {
-        let mut queue = lib::protocol::sender::Sender::new();
-        while let Ok(message) = cx.local.can_event_receiver.recv().await {
-            if message.is_none() {
-                let mut events = cx.local.can.interrupt_manager();
-                while let Some(event) = events.next() {
-                    if let Some(message) = event.handle() {
-                        let de: MessageType = match MessageType::try_from(&message) {
-                            Ok(val) => val,
-                            Err(_) => continue,
-                        };
-                        let (deadline, target) = match de {
-                            MessageType::Write(WriteType::MotorReference { deadline, target }) => {
-                                (Mono::now() + deadline.micros(), target)
-                            }
-                            _ => continue,
-                        };
-                        cx.shared.target.lock(|duty| *duty = (target, deadline));
-                    }
-                }
-                if let Some(msg) = queue.dequeue() {
-                    // It is totally fine if this fails here.
-                    let _ = cx.local.can.transmit(&msg);
-                } else {
-                    // Grabs the 10 latest control messages from the buffer. This is safe since we
-                    // will never collide with an ongoing write due to shere size of the buffer.
-                    queue = unsafe { controller::util::DATA.get_n_latest::<10>() };
-                }
-
+    fn can(mut cx: can::Context) {
+        cx.local.can_timer.reset_event(RtcInterrupt::Compare0);
+        while let Ok(recv) = cx.local.can_event_receiver.try_recv() {
+            if let Some(message) = recv {
+                let _ = cx.local.can.transmit(&message);
                 continue;
             }
-            let message = unsafe { message.unwrap_unchecked() };
+            let mut events = cx.local.can.interrupt_manager();
+            let mut counter = 0;
+            while let Some(event) = events.next() {
+                defmt::info!("Zpin {}", counter);
+                counter += 1;
 
-            let _ = cx.local.can.transmit(&message);
+                if let Some(message) = event.handle() {
+                    defmt::trace!("Got message :) ");
+                    let de: MessageType = match MessageType::try_from(&message) {
+                        Ok(val) => val,
+                        Err(e) => {
+                            defmt::trace!("deserialized err {}", Debug2Format(&e));
+                            continue;
+                        }
+                    };
+                    let (deadline, target) = match de {
+                        MessageType::Write(WriteType::MotorReference { deadline, target }) => {
+                            (Mono::now() + deadline.micros(), target)
+                        }
+                        _ => continue,
+                    };
+                    defmt::warn!(
+                        "Got control reference {} until {}!",
+                        target,
+                        deadline.duration_since_epoch().to_millis()
+                    );
+                    cx.shared.target.lock(|duty| *duty = (target, deadline));
+                }
+            }
+            if let Some(msg) = cx.local.queue.dequeue() {
+                defmt::warn!("Responding with can frame :)");
+                // It is totally fine if this fails here.
+                let _ = cx.local.can.transmit(&msg);
+                cx.local.queue.set_theta(1.0).unwrap();
+            } else {
+                // Grabs the 10 latest control messages from the buffer. This is safe since
+                // we will never collide with an ongoing write due
+                // to shere size of the buffer.
+                *cx.local.queue = unsafe { controller::util::DATA.get_n_latest::<2>() };
+            }
         }
+        cx.local.can_timer.clear_counter();
     }
 
     #[task(binds = TIMER3,
@@ -366,7 +418,6 @@ mod etc {
             ki:Option<f32> = None,
             kd:Option<f32> = None,
             loop_counter:usize = 0,
-            buffer,
         ],
         shared = [
             // The target duty cycle.
@@ -394,6 +445,18 @@ mod etc {
         control_loop_timer.reset_event();
 
         let (mut target, deadline) = cx.shared.target.lock(|t| *t);
+        let (delta_time, previous_delta_time) = cx.shared.dvel.lock(|t| *t);
+        let delta_time = delta_time as f32 / 1_000_000.;
+        const FACTOR: f32 = core::f32::consts::TAU / 86.;
+        let angular_velocity = FACTOR / delta_time;
+
+        if angular_velocity <= 1. || angular_velocity == f32::INFINITY {
+            let time_to_sleep = (start + DURATION) - Mono::now();
+
+            // Wait until the next control loop iteration.
+            control_loop_timer.timeout(time_to_sleep);
+            return;
+        }
 
         if Mono::now() > deadline {
             target = 0.;
@@ -435,10 +498,6 @@ mod etc {
 
         // Compute an intermediate representation of torque. This is no longer needed
         // but will be logger over the CAN bus for ease of debugging.
-        let (delta_time, previous_delta_time) = cx.shared.dvel.lock(|t| *t);
-        let delta_time = delta_time as f32 / 1_000_000.;
-        const FACTOR: f32 = core::f32::consts::TAU / 86.;
-        let angular_velocity = FACTOR / delta_time;
 
         let delta_time = previous_delta_time as f32 / 1_000_000.;
         let prev = *cx.local.previous_avel;
@@ -474,7 +533,7 @@ mod etc {
     ///
     /// This samples all of the currents but returns only the global system
     /// current as this is a smoother signal.
-    #[task(binds = SAADC, shared = [current,current_sense], priority=3)]
+    #[task(binds = SAADC, shared = [current,current_sense], local = [counter:u32 = 0], priority=3)]
     /// Continuously samples the current.
     fn current_sense(mut cx: current_sense::Context) {
         let sample = cx
@@ -483,8 +542,15 @@ mod etc {
             .lock(|sense| sense.complete_sample());
 
         cx.shared.current.lock(|current| {
-            *current = (sample[3] + *current) / 2.;
+            *current = sample[3];
         });
+        *cx.local.counter += 1;
+
+        if *cx.local.counter > 100 {
+            defmt::info!("Current: {}", sample[3]);
+
+            *cx.local.counter = 0;
+        }
     }
 
     #[task(local = [phase1,phase2,phase3],shared = [duty,pattern],priority = 2)]

@@ -26,8 +26,8 @@ statics = { path = "./statics" }
 lib = { path = "./lib", default-features = false }
 # Helpers
 
-esc = { package = "bsp", git = "https://github.com/Ltu-Bike-trailer/ESC.git", branch = "bsp-2", optional = true, default-features = false }
-#esc = { package = "bsp", path = "../ESC/bsp", optional = true, default-features = false }
+#esc = { package = "bsp", git = "https://github.com/Ltu-Bike-trailer/ESC.git", branch = "bsp-2", optional = true, default-features = false }
+esc = { package = "bsp", path = "../ESC/bsp", optional = true, default-features = false }
 
 ## Defines a double ended queue implementation of arrays instead of vectors
 arraydeque = { version = "0.5.1", default-features = false }
