@@ -385,21 +385,25 @@ mod hlc {
         // AVERAGE SAMLPES
 
         let sample = cx.local.buffer.avg();
-
-        let converted: f32 = FORCE_INV * sample - (OFFSET / K_NEWTON) - *cx.local.noise_floor;
+        
+        if *cx.local.noise_reject_counter > 10 {
+            let converted: f32 = FORCE_INV * sample - (OFFSET / K_NEWTON) - *cx.local.noise_floor;
+        
         let mut converted_avg: f32 = 0.0;
         //let converted = GAIN * sample;
-
+        
         cx.shared.s_type_force.lock(|f| {
             //converted_avg = (converted + *f) / 2.0 ;
             //*f = (converted + *f ) / 2.0;
             defmt::info!("Stype force: {}", f);
             *f = converted;
         });
+        
         *cx.local.ptr = 0;
         defmt::trace!("Measured {}N", converted);
         defmt::trace!("Measured noise floor {}N", cx.local.noise_floor);
         //cx.shared.stype.lock(|stype| stype.start_sample());
+        }
     }
 
     ///Lowest priority task. Expected to be static during operation but needs
