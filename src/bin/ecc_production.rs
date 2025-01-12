@@ -24,6 +24,7 @@ nrf_timer4_monotonic!(Mono, 16_000_000);
 )]
 mod etc {
 
+    use biquad::{Biquad, Coefficients, DirectForm2Transposed, Type, Q_BUTTERWORTH_F32};
     use can_mcp2515::drivers::{
         can::{CanInte, Mcp2515Driver},
         message::CanMessage,
@@ -85,6 +86,8 @@ mod etc {
         can_event_sender: rtic_sync::channel::Sender<'static, Option<CanMessage>, 10>,
         can_event_receiver: rtic_sync::channel::Receiver<'static, Option<CanMessage>, 10>,
         can_timer: Rtc<RTC0>,
+        biquad_high_pass: DirectForm2Transposed<f32>,
+        biquad_low_pass: DirectForm2Transposed<f32>,
     }
 
     #[init]
@@ -189,6 +192,25 @@ mod etc {
             .set_compare(RtcCompareReg::Compare0, 32768)
             .unwrap(); //655);
         can_timer.enable_counter();
+
+        // Cutoff and sampling frequencies
+        let fc = biquad::Hertz::from_hz(0.1f32).unwrap();
+        let fs = biquad::Hertz::from_hz(10_000f32).unwrap();
+
+        let coeffs =
+            Coefficients::<f32>::from_params(Type::HighPass, fs, fc, Q_BUTTERWORTH_F32).unwrap();
+
+        // We do not need to re-compute these during runtime.
+        let biquad_high_pass: DirectForm2Transposed<f32> =
+            DirectForm2Transposed::<f32>::new(coeffs);
+            
+        // Ignore any noise that is faster than the rate of the motor.
+        let fc = biquad::Hertz::from_hz(200f32).unwrap();
+        let coeffs =
+            Coefficients::<f32>::from_params(Type::LowPass, fs, fc, Q_BUTTERWORTH_F32).unwrap();
+
+        // We do not need to re-compute these during runtime.
+        let biquad_low_pass: DirectForm2Transposed<f32> = DirectForm2Transposed::<f32>::new(coeffs);
         //let _ = mono_sweep::spawn();
         defmt::debug!("INIT: Done");
         (
@@ -220,6 +242,8 @@ mod etc {
                 can_event_receiver,
                 can_event_sender,
                 can_timer,
+                biquad_high_pass,
+                biquad_low_pass,
             },
         )
     }
@@ -556,7 +580,7 @@ mod etc {
     ///
     /// This samples all of the currents but returns only the global system
     /// current as this is a smoother signal.
-    #[task(binds = SAADC, shared = [current,current_sense,measuring], local = [counter:u32 = 0], priority=4)]
+    #[task(binds = SAADC, shared = [current,current_sense,measuring], local = [counter:u32 = 0,secs:u64= 0,biquad_high_pass,biquad_low_pass], priority=4)]
     /// Continuously samples the current.
     fn current_sense(mut cx: current_sense::Context) {
         let mut sample = cx
@@ -565,16 +589,22 @@ mod etc {
             .lock(|sense| sense.complete_sample());
         let pwm = unsafe { (0x0 as *mut Pwm<PWM0>).read() };
         pwm.enable_interrupt(pwm::PwmEvent::PwmPeriodEnd);
-        sample[3] -= 0.09;
 
+        sample[3] = cx.local.biquad_high_pass.run(sample[3]);
+        sample[3] = cx.local.biquad_low_pass.run(sample[3]);
         cx.shared.current.lock(|current| {
             *current = (sample[3] + *current) / 2.0;
         });
         cx.shared.measuring.lock(|measuring| *measuring = false);
+
+        // Compute freq to ensure that we are sampling correctly.
         *cx.local.counter += 1;
-        if *cx.local.counter > 100 {
-            //defmt::info!("Current: {}", sample[3]);
+        let secs = Mono::now().duration_since_epoch().to_secs();
+        if *cx.local.secs != secs {
+            defmt::warn!("Sampling rate: {}", *cx.local.counter);
+
             *cx.local.counter = 0;
+            *cx.local.secs = secs;
         }
     }
 
