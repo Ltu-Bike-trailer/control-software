@@ -119,7 +119,7 @@ mod hlc {
         let can_interrupt = port0.p0_28.into_pullup_input().degrade();
 
         // M1 seems to be the upper cap for the frequency.
-        let mut spi = Spi::new(device.SPI0, pins, Frequency::K500, MODE_0);
+        let mut spi = Spi::new(device.SPI0, pins, Frequency::K250, MODE_0);
         let mut gpiote = Gpiote::new(device.GPIOTE);
 
         const CLKEN: bool = true;
@@ -292,7 +292,7 @@ mod hlc {
         cx.local.can_thing.reset_event(RtcInterrupt::Compare0);
 
         let msg = cx.shared.sender.lock(|sender| sender.dequeue());
-
+        defmt::info!("Handle CAN");
         if let Some(msg) = msg {
             defmt::warn!("SENDING CAN FRAME???");
             cx.local.candriver.transmit(&msg);
