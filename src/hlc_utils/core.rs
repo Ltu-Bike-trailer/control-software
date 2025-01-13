@@ -105,13 +105,13 @@ impl Controller {
             + Self::B.2 * ek.2;
 
         // Modified model:
-        let _actuate_new = Self::ANEW.0 * tk.0 - Self::ANEW.1 * tk.1 + Self::ANEW.2 * tk.2 - Self::BNEW.0 * ek.0
+        let actuate_new = Self::ANEW.0 * tk.0 - Self::ANEW.1 * tk.1 + Self::ANEW.2 * tk.2 - Self::BNEW.0 * ek.0
             - Self::BNEW.1 * ek.1
             + Self::BNEW.2 * ek.2;
 
         defmt::info!("Actuate raw: {}", actuate);
-        defmt::info!("Actuate raw modified model: {}", _actuate_new);
-        self.write_moment(actuate);
+        defmt::info!("Actuate raw modified model: {}", actuate_new);
+        self.write_moment(actuate_new);
         self.write_err(error);
 
         if not_ready_e && not_ready_t {
