@@ -4,7 +4,7 @@
 #![no_main]
 #![no_std]
 #![feature(async_fn_traits)]
-#![feature(async_closure)]
+//#![feature(async_closure)]
 #![deny(
     warnings,
     missing_docs,
@@ -21,7 +21,6 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use defmt_rtt as _;
 use panic_probe as _;
 pub mod boards;
-pub mod drivers;
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message
 // this prevents the panic message being printed *twice* when `defmt::panic` is

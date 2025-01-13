@@ -4,6 +4,7 @@
 #![deny(clippy::all)]
 #![deny(warnings)]
 #![feature(generic_arg_infer)]
+#![allow(unused)]
 
 
 use controller as _; // global logger + panicking-behavior + memory layout
@@ -17,11 +18,9 @@ use controller as _; // global logger + panicking-behavior + memory layout
 mod app {
 
     use defmt::info;
-    use controller::drivers::can::{
-            Mcp2515Driver,
-            Mcp2515Settings,
-    };
     use embedded_can::blocking::Can;
+    use can_mcp2515::drivers::can::*;
+    use can_mcp2515::drivers::message::CanMessage;
 
     use lib::protocol::sender::Sender;
     use nrf52840_hal::{self as hal, gpio::*, gpiote::Gpiote, pac::SPI0, saadc::{Gain, Oversample, Reference, Resistor, Resolution, SaadcConfig, Time}, spi::{Frequency, Spi}  
@@ -135,8 +134,10 @@ mod app {
         );
 
         // set up can setting
-        let settings = Mcp2515Settings::default();
-        let can_driver = Mcp2515Driver::init(spi_battery, cs0, can_interrupt, settings);
+        //let settings = Mcp2515Settings::default();
+         let mut can_settings =
+            Mcp2515Settings::default().enable_interrupts(&[CanInte::TX0IE, CanInte::TX1IE, CanInte::TX2IE]);
+        let can_driver = Mcp2515Driver::init(spi_battery, cs0, can_interrupt, can_settings);
 
         // new interrupt (should not be used as this firmware only sends data)
         let gpiote = Gpiote::new(device.GPIOTE);
@@ -182,7 +183,7 @@ mod app {
         let saadc = cx.local.saadc;
         let saadc_pin = cx.local.saadc_pin;
         let old_soc = cx.local.old_soc;
-        let can_driver = cx.local.can_driver;
+        //let can_driver = cx.local.can_driver;
         let sender = cx.local.sender;
 
         // read value from saadc_pin
@@ -222,7 +223,8 @@ mod app {
                 None => {return},
             };
             msg.print_frame();
-            let _ = can_driver.transmit(&msg);
+            //can_driver.transmit(&msg).unwrap();
+            cx.local.can_driver.transmit(&msg);
         }
 
         // set current state of charge to the old state of carge

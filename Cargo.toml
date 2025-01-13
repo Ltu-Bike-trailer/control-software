@@ -22,6 +22,7 @@ embedded-hal = "1.0.0"
 statics = { path = "./statics" }
 
 lib = { path = "./lib",default-features = false }
+can_mcp2515 = { git = "https://github.com/wiiggee1/can_mcp2515", branch = "master"}
 # Helpers
 
 ## Defines a double ended queue implementation of arrays instead of vectors

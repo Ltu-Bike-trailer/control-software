@@ -9,7 +9,7 @@ pub mod sender;
 #[allow(clippy::enum_glob_use)]
 use constants::{InvalidMessageId, Message::*};
 use embedded_can::{Frame, Id};
-use message::CanMessage;
+use can_mcp2515::drivers::message::CanMessage;
 
 /// Denotes all of the supported message types.
 #[derive(Clone, Debug)]
