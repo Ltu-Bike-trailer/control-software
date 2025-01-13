@@ -100,11 +100,10 @@ impl<T: Sized + Clone + Default, const N: usize> RingBuffer<T, N> {
             }
         }
     }
-
 }
-impl< const N: usize> RingBuffer<f32, N> {
+impl<const N: usize> RingBuffer<f32, N> {
     /// Computes a roling average.
-   pub fn avg(&self) -> f32 {
+    pub fn avg(&self) -> f32 {
         self.data.iter().sum::<f32>() / N as f32
     }
 }

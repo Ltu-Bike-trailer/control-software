@@ -16,6 +16,7 @@ mod hlc {
 
     use core::borrow::Borrow;
 
+    use biquad::*;
     use can_mcp2515::drivers::{can::*, message::CanMessage};
     use controller::{
         boards::*,
@@ -88,6 +89,8 @@ mod hlc {
         hlc_controller: Controller,
         control_timer: Timer<TIMER3>,
         can_thing: Rtc<RTC0>,
+        biquad_filter_low: DirectForm1<f32>,
+        biquad_filter_high: DirectForm1<f32>,
     }
 
     #[init]
@@ -114,7 +117,7 @@ mod hlc {
         let cs_pin = port1.p1_08.into_push_pull_output(Level::High).degrade();
         let can_interrupt = port0.p0_28.into_pullup_input().degrade();
 
-        // M1 seems to be the upper cap for the frequency. 
+        // M1 seems to be the upper cap for the frequency.
         let mut spi = Spi::new(device.SPI0, pins, Frequency::K500, MODE_0);
         let mut gpiote = Gpiote::new(device.GPIOTE);
 
@@ -201,11 +204,30 @@ mod hlc {
         can_thing.enable_counter();
         //control_timer.start(25u32.millis());
 
+        // Biquad IIR filter setup:
+        let filter_coef = Coefficients::<f32>::from_params(
+            Type::LowPass,
+            biquad::Hertz::from_hz(10_000f32).unwrap(),
+            biquad::Hertz::from_hz(0.02f32).unwrap(),
+            Q_BUTTERWORTH_F32,
+        )
+        .unwrap();
+
+        let lowpass_biquad = DirectForm1::<f32>::new(filter_coef);
+
+        let filter_coef = Coefficients::<f32>::from_params(
+            Type::HighPass,
+            biquad::Hertz::from_hz(10_000f32).unwrap(),
+            biquad::Hertz::from_hz(0.02f32).unwrap(),
+            Q_BUTTERWORTH_F32,
+        )
+        .unwrap();
+
+        let highpass_biquad = DirectForm1::<f32>::new(filter_coef);
+
         //Start sampeling the stype
         adc.start_sample();
         read_hx711::spawn();
-        //handle_can::spawn();
-        //controller_output::spawn();
 
         assert!(Mono::now().ticks() != 0);
 
@@ -227,6 +249,8 @@ mod hlc {
                 control_reference_sender: send,
                 control_timer,
                 can_thing,
+                biquad_filter_low: lowpass_biquad,
+                biquad_filter_high: highpass_biquad,
             },
         )
     }
@@ -249,7 +273,7 @@ mod hlc {
                 defmt::info!("GPIOTE interrupt occurred [channel 0] - Can Master!");
                 cx.shared.can_rx.lock(|rx| *rx = true);
                 let _ = cx.local.can_sender.try_send(None);
-                
+
                 cortex_m::peripheral::NVIC::mask(nrf52840_hal::pac::interrupt::GPIOTE);
                 defmt::println!("\n");
             }
@@ -285,26 +309,22 @@ mod hlc {
                         Ok(msg) => msg,
                         Err(_) => continue,
                     };
-                    
                 }
                 if let Some(mut frame) = received_message {
                     let id = frame.id_raw();
-            defmt::info!("GPIOTE: Received: data: {:?}, Id: {:016b}", frame.data, id);
-            
-                }//let msg_type = MessageType::try_from(&received_message.unwrap()).unwrap();
-            //defmt::info!("MessageType: {:?}", Debug2Format(&msg_type)); 
-            //
+                    defmt::info!("GPIOTE: Received: data: {:?}, Id: {:016b}", frame.data, id);
+                } //let msg_type =
+                  // MessageType::try_from(&received_message.unwrap()).unwrap();
+                  // defmt::info!("MessageType: {:?}", Debug2Format(&msg_type));
+                  //
             }
             cx.shared.gpiote.lock(|gpiote| {
                 gpiote.channel0().clear();
                 gpiote.channel0().reset_events();
                 unsafe { cortex_m::peripheral::NVIC::unmask(nrf52840_hal::pac::interrupt::GPIOTE) };
-
             })
-
-
         }
-        
+
         cx.local.can_thing.clear_counter();
 
         //defmt::info!("hello");
@@ -349,10 +369,10 @@ mod hlc {
     #[task(binds = SAADC, shared =[s_type_force,stype],local = [buffer:RingBuffer<f32,50> = RingBuffer::new([0.;50]), static_reject:[f32;128] = [0.;128],reject_ptr:usize = 0, noise_reject_counter:usize = 0, noise_floor:f32 = 0., ptr:usize = 0], priority=2)]
     fn read_stype(mut cx: read_stype::Context) {
         let [sample] = cx.shared.stype.lock(|s_type| s_type.complete_sample(conv));
-        
+
         if *cx.local.reject_ptr < 100 {
             *cx.local.reject_ptr += 1;
-            return
+            return;
         }
         // Scale in between.
         const GAIN: f32 = 50.;
@@ -366,13 +386,10 @@ mod hlc {
             cx.local.static_reject[*cx.local.noise_reject_counter] = sample;
             *cx.local.noise_reject_counter += 1;
             return;
-        }
-        else if *cx.local.noise_reject_counter == 120 {
+        } else if *cx.local.noise_reject_counter == 120 {
+            *cx.local.noise_floor = cx.local.static_reject.iter().sum::<f32>() / 120.; //.map(|num|FORCE_INV * *num- (OFFSET / K_NEWTON)).sum::<f32>() / 120.;
+            defmt::warn!("Noise floor {}", cx.local.noise_floor);
 
-
-            *cx.local.noise_floor = cx.local.static_reject.iter().sum::<f32>() / 120.;//.map(|num|FORCE_INV * *num- (OFFSET / K_NEWTON)).sum::<f32>() / 120.;
-            defmt::warn!("Noise floor {}",cx.local.noise_floor);
-            
             *cx.local.noise_floor = FORCE_INV * *cx.local.noise_floor - (OFFSET / K_NEWTON);
             *cx.local.noise_reject_counter += 1;
             return;
@@ -381,28 +398,27 @@ mod hlc {
         cx.local.buffer.assign_next(sample);
         cx.shared.stype.lock(|s_type| s_type.start_sample());
 
-         
         // AVERAGE SAMLPES
 
         let sample = cx.local.buffer.avg();
-        
+
         if *cx.local.noise_reject_counter > 10 {
             let converted: f32 = FORCE_INV * sample - (OFFSET / K_NEWTON) - *cx.local.noise_floor;
-        
-        let mut converted_avg: f32 = 0.0;
-        //let converted = GAIN * sample;
-        
-        cx.shared.s_type_force.lock(|f| {
-            //converted_avg = (converted + *f) / 2.0 ;
-            //*f = (converted + *f ) / 2.0;
-            defmt::info!("Stype force: {}", f);
-            *f = converted;
-        });
-        
-        *cx.local.ptr = 0;
-        defmt::trace!("Measured {}N", converted);
-        defmt::trace!("Measured noise floor {}N", cx.local.noise_floor);
-        //cx.shared.stype.lock(|stype| stype.start_sample());
+
+            let mut converted_avg: f32 = 0.0;
+            //let converted = GAIN * sample;
+
+            cx.shared.s_type_force.lock(|f| {
+                //converted_avg = (converted + *f) / 2.0 ;
+                //*f = (converted + *f ) / 2.0;
+                defmt::info!("Stype force: {}", f);
+                *f = converted;
+            });
+
+            *cx.local.ptr = 0;
+            defmt::trace!("Measured {}N", converted);
+            defmt::trace!("Measured noise floor {}N", cx.local.noise_floor);
+            //cx.shared.stype.lock(|stype| stype.start_sample());
         }
     }
 
@@ -430,7 +446,7 @@ mod hlc {
         }
     }
 
-    #[task(binds =TIMER3, local = [hlc_controller, control_reference_sender,control_timer], shared = [s_type_force,stype, sender], priority = 5)]
+    #[task(binds = TIMER3, local = [hlc_controller, control_reference_sender, control_timer, biquad_filter_low, biquad_filter_high], shared = [s_type_force,stype, sender], priority = 5)]
     fn controller_output(mut cx: controller_output::Context) {
         let mut time = Mono::now();
         cx.local.control_timer.reset_event();

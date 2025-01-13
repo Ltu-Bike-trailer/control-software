@@ -56,8 +56,11 @@ impl Default for Controller {
 impl Controller {
     /// controller output constants.
     const A: (f32, f32, f32) = (1.271, 0.0289, 0.01832);
+    const ANEW: (f32, f32, f32) = (1.961, 0.9608, 0.007666);
+    
     /// Input constants for controller.
     const B: (f32, f32, f32) = (0.3248, 0.4279, 0.1309);
+    const BNEW: (f32, f32, f32) = (0.004878, 0.007412, 0.05132);
 
     #[inline(always)]
     #[must_use]
@@ -96,10 +99,18 @@ impl Controller {
         let not_ready_e = self.e_input.into_iter().any(|val| val == 0f32);
         let not_ready_t = self.t_output.into_iter().any(|val| val == 0f32);
 
+        // First model 
         let actuate = Self::A.0 * tk.0 - Self::A.1 * tk.1 + Self::A.2 * tk.2 + Self::B.0 * ek.0
             - Self::B.1 * ek.1
             + Self::B.2 * ek.2;
+
+        // Modified model:
+        let _actuate_new = Self::ANEW.0 * tk.0 - Self::ANEW.1 * tk.1 + Self::ANEW.2 * tk.2 - Self::BNEW.0 * ek.0
+            - Self::BNEW.1 * ek.1
+            + Self::BNEW.2 * ek.2;
+
         defmt::info!("Actuate raw: {}", actuate);
+        defmt::info!("Actuate raw modified model: {}", _actuate_new);
         self.write_moment(actuate);
         self.write_err(error);
 
@@ -109,7 +120,6 @@ impl Controller {
         } else {
             Some(actuate.clamp(-2.0, 2.0))
             //Some(actuate)
-
         }
     }
 
