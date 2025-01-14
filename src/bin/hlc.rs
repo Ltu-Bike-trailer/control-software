@@ -20,6 +20,7 @@ mod hlc {
     use can_mcp2515::drivers::{can::*, message::CanMessage};
     use controller::{
         boards::*,
+        cart::constants::DURATION,
         drivers::hx711::{Driver, Gain, ValidTimings},
         hlc_utils::{config::*, core::*, events::*, stype_calibration::*},
         RingBuffer,
@@ -91,7 +92,6 @@ mod hlc {
         can_thing: Rtc<RTC0>,
         biquad_filter_high: DirectForm2Transposed<f32>,
         biquad_filter_low: DirectForm2Transposed<f32>,
-
     }
 
     #[init]
@@ -119,11 +119,11 @@ mod hlc {
         let can_interrupt = port0.p0_28.into_pullup_input().degrade();
 
         // M1 seems to be the upper cap for the frequency.
-        let mut spi = Spi::new(device.SPI0, pins, Frequency::K250, MODE_0);
+        let mut spi = Spi::new(device.SPI0, pins, Frequency::K500, MODE_0);
         let mut gpiote = Gpiote::new(device.GPIOTE);
 
         const CLKEN: bool = true;
-        const OSM: bool = false;
+        const OSM: bool = true;
         const ABAT: bool = false;
 
         const MASK_RXN: u16 = 0b1111_1111_1110_0000;
@@ -147,6 +147,9 @@ mod hlc {
 
         defmt::info!("Interrupts: {:#08b}", can_settings.interrupts);
 
+        for _ in 0..1000_000 {
+            asm::nop();
+        }
         let mut can_driver = Mcp2515Driver::init(spi, cs_pin, can_interrupt, can_settings);
 
         if true {
@@ -216,7 +219,7 @@ mod hlc {
         .unwrap();
 
         let highpass_biquad = DirectForm2Transposed::<f32>::new(filter_coef);
-        
+
         let filter_coef = Coefficients::<f32>::from_params(
             Type::LowPass,
             biquad::Hertz::from_hz(97f32).unwrap(),
@@ -225,10 +228,11 @@ mod hlc {
         )
         .unwrap();
 
-
         let lowpass_biquad = DirectForm2Transposed::<f32>::new(filter_coef);
 
-        //let frame = CanMessage::new(lib::protocol::constants::Message::from(Message::LeftMotor), &[0x1, 0x2, 0x3]);
+        //let frame =
+        // CanMessage::new(lib::protocol::constants::Message::from(Message::LeftMotor),
+        // &[0x1, 0x2, 0x3]);
 
         //Start sampeling the stype
         adc.start_sample();
@@ -256,7 +260,6 @@ mod hlc {
                 can_thing,
                 biquad_filter_high: highpass_biquad,
                 biquad_filter_low: lowpass_biquad,
-
             },
         )
     }
@@ -292,9 +295,9 @@ mod hlc {
         cx.local.can_thing.reset_event(RtcInterrupt::Compare0);
 
         let msg = cx.shared.sender.lock(|sender| sender.dequeue());
-        defmt::info!("Handle CAN");
+        //defmt::info!("Handle CAN");
         if let Some(msg) = msg {
-            defmt::warn!("SENDING CAN FRAME???");
+            //defmt::warn!("SENDING CAN FRAME???");
             cx.local.candriver.transmit(&msg);
         }
 
@@ -318,7 +321,8 @@ mod hlc {
                 }
                 if let Some(mut frame) = received_message {
                     let id = frame.id_raw();
-                    defmt::info!("GPIOTE: Received: data: {:?}, Id: {:016b}", frame.data, id);
+                    //defmt::info!("GPIOTE: Received: data: {:?}, Id: {:016b}",
+                    // frame.data, id);
                 } //let msg_type =
                   // MessageType::try_from(&received_message.unwrap()).unwrap();
                   // defmt::info!("MessageType: {:?}", Debug2Format(&msg_type));
@@ -374,7 +378,6 @@ mod hlc {
     ///High priority constant polling of S-Type loadcell
     #[task(binds = SAADC, shared =[s_type_force,stype],local = [buffer:RingBuffer<f32,50> = RingBuffer::new([0.;50]), static_reject:[f32;128] = [0.;128],reject_ptr:usize = 0, noise_reject_counter:usize = 0, noise_floor:f32 = 0., ptr:usize = 0, biquad_filter_high, biquad_filter_low], priority=2)]
     fn read_stype(mut cx: read_stype::Context) {
-
         let [sample] = cx.shared.stype.lock(|s_type| s_type.complete_sample(conv));
         cx.shared.stype.lock(|s_type| s_type.start_sample());
 
@@ -391,46 +394,43 @@ mod hlc {
         const K_NEWTON: f32 = K / (200.0 * 9.82);
         const FORCE_INV: f32 = (1.0 / K_NEWTON);
 
-        //if *cx.local.noise_reject_counter < 120 {
-        //    cx.local.static_reject[*cx.local.noise_reject_counter] = sample;
-        //    *cx.local.noise_reject_counter += 1;
-        //    return;
-        //} else if *cx.local.noise_reject_counter == 120 {
-        //    *cx.local.noise_floor = cx.local.static_reject.iter().sum::<f32>() / 120.; //.map(|num|FORCE_INV * *num- (OFFSET / K_NEWTON)).sum::<f32>() / 120.;
-        //    defmt::warn!("Noise floor {}", cx.local.noise_floor);
-        //
-        //    *cx.local.noise_floor = FORCE_INV * *cx.local.noise_floor - (OFFSET / K_NEWTON);
-        //    *cx.local.noise_reject_counter += 1;
-        //    return;
-        //}
-        defmt::warn!("SAADC :)");
-       // cx.local.buffer.assign_next(sample);
+        if *cx.local.noise_reject_counter < 120 {
+            cx.local.static_reject[*cx.local.noise_reject_counter] = sample;
+            *cx.local.noise_reject_counter += 1;
+            return;
+        } else if *cx.local.noise_reject_counter == 120 {
+            *cx.local.noise_floor = cx.local.static_reject[0..120].iter().sum::<f32>() / 120.; //.map(|num|FORCE_INV * *num- (OFFSET / K_NEWTON)).sum::<f32>() / 120.;
+                                                                                               //defmt::warn!("Noise floor {}", cx.local.noise_floor);
+            *cx.local.noise_floor = FORCE_INV * *cx.local.noise_floor - (OFFSET / K_NEWTON);
+            *cx.local.noise_reject_counter += 1;
+            return;
+        }
+        //defmt::warn!("SAADC :)");
+        cx.local.buffer.assign_next(sample);
 
         // AVERAGE SAMLPES
-        //let sample = cx.local.buffer;
-        
+        let sample = cx.local.buffer.avg();
+
         if *cx.local.reject_ptr > 20 {
+            let converted: f32 = FORCE_INV * sample - (OFFSET / K_NEWTON) - *cx.local.noise_floor;
+            //let converted = cx.local.biquad_filter_high.run(converted);
+            //let converted = cx.local.biquad_filter_low.run(converted);
 
-            let converted: f32 = FORCE_INV * sample - (OFFSET / K_NEWTON);
-            let converted = cx.local.biquad_filter_high.run(converted);
-            let converted = cx.local.biquad_filter_low.run(converted);
+            //let mut converted_avg: f32 = 0.0;
+            //let converted = GAIN * sample;
 
-                //let mut converted_avg: f32 = 0.0;
-                //let converted = GAIN * sample;
+            cx.shared.s_type_force.lock(|f| {
+                //converted_avg = (converted + *f) / 2.0 ;
+                //*f = (converted + *f ) / 2.0;
+                //defmt::info!("Stype force: {}", f);
+                *f = converted;
+            });
 
-                cx.shared.s_type_force.lock(|f| {
-                    //converted_avg = (converted + *f) / 2.0 ;
-                    //*f = (converted + *f ) / 2.0;
-                    defmt::info!("Stype force: {}", f);
-                    *f = converted;
-                });
-
-                *cx.local.ptr = 0;
-                defmt::info!("Measured {}N", converted);
-                defmt::trace!("Measured noise floor {}N", cx.local.noise_floor);
-                //cx.shared.stype.lock(|stype| stype.start_sample());
+            *cx.local.ptr = 0;
+            //defmt::info!("Measured {}N", converted);
+            //defmt::trace!("Measured noise floor {}N", cx.local.noise_floor);
+            //cx.shared.stype.lock(|stype| stype.start_sample());
         }
-        
     }
 
     ///Lowest priority task. Expected to be static during operation but needs
@@ -445,7 +445,7 @@ mod hlc {
                 .await;
             let decoded_data = cx.local.hx711.decode_data(data);
 
-            defmt::trace!("Decoded Data: {:?}", decoded_data.data_out);
+            //defmt::trace!("Decoded Data: {:?}", decoded_data.data_out);
 
             // Write the data to the shared variable
             cx.shared
@@ -457,7 +457,7 @@ mod hlc {
         }
     }
 
-    #[task(binds = TIMER3, local = [hlc_controller, control_reference_sender, control_timer], shared = [s_type_force,stype, sender], priority = 5)]
+    #[task(binds = TIMER3, local = [hlc_controller, control_reference_sender, control_timer, previous_error: f32 = 0.0, integral: f32 = 0.0], shared = [s_type_force,stype, sender], priority = 5)]
     fn controller_output(mut cx: controller_output::Context) {
         let mut time = Mono::now();
         cx.local.control_timer.reset_event();
@@ -467,21 +467,22 @@ mod hlc {
             .s_type_force
             .lock(|input_force| cx.local.hlc_controller.actuate(*input_force))
         {
-            defmt::info!("Actuate: {}", actuate);
-
+            //defmt::info!("Actuate: {}", actuate);
+            *cx.local.previous_error = cx.shared.s_type_force.lock(|f| *f);
             //defmt::info!("Actuate: {}", actuate);
             let actuate_frame = lib::protocol::MessageType::Write(WriteType::MotorReference {
-                target: actuate,
-                deadline: 30,
+                target: 0.1f32,
+                deadline: 2500_000,
             });
-            cx.shared
-                .sender
-                .lock(|sender| sender.enqueue(actuate_frame));
+            //cx.shared
+            //    .sender
+            //    .lock(|sender| sender.enqueue(actuate_frame));
+
             //.try_send(Some(actuate_frame))
             //.unwrap();
             //defmt::info!("Should have sent now....");
         } else {
-            defmt::warn!(":/");
+            //defmt::warn!(":/");
         }
 
         cx.local
@@ -491,5 +492,42 @@ mod hlc {
 
         //defmt::info!("After delay!");
         //time = Mono::now();
+
+        // PID controller:
+        const KP: f32 = 0.006;
+        const KI: f32 = 0.0001;
+        const KD: f32 = 0.00000;
+        let current_error = cx.shared.s_type_force.lock(|f| *f);
+
+        let p_component = (KP * current_error).clamp(-100., 100.);
+        let i_component = (*cx.local.previous_error + current_error / 2.) * 0.02;
+        let i_component = if i_component.is_finite() {
+            i_component
+        } else {
+            0.
+        };
+        *cx.local.integral = (*cx.local.integral + i_component);
+        let i_component = KI * *cx.local.integral;
+        let d_component = KD
+            * ((current_error - *cx.local.previous_error)
+                / (DURATION.to_micros() as f32 / 1_000_000.))
+                .clamp(-100., 100.);
+        *cx.local.previous_error = current_error;
+
+        let actuation = p_component + i_component; //p_component + i_component + d_component;
+
+        // Ensure that we get a percentage.
+        //let actuation = actuation;
+        defmt::info!("Actuate: {}", actuation);
+        defmt::info!("Error: {}", current_error);
+
+          let actuate_frame = lib::protocol::MessageType::Write(WriteType::MotorReference {
+                target: actuation,
+                deadline: 2500_000,
+            });
+            cx.shared
+                .sender
+                .lock(|sender| sender.enqueue(actuate_frame));
+
     }
 }
